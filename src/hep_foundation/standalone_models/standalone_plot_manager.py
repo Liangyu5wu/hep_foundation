@@ -223,9 +223,16 @@ class StandalonePlotManager:
                 self.logger.warning("No data efficiency results available")
                 return
 
+            # Filter out invalid test losses (non-positive values)
+            valid_data = [(size, loss) for size, loss in zip(data_sizes, test_losses) 
+                         if isinstance(loss, (int, float)) and loss > 0]
+            
+            if not valid_data:
+                self.logger.warning("No valid data efficiency results with positive test losses")
+                return
+
             # Sort by data size
-            sorted_data = sorted(zip(data_sizes, test_losses))
-            data_sizes, test_losses = zip(*sorted_data)
+            data_sizes, test_losses = zip(*sorted(valid_data))
 
             # Create plot
             fig, ax = plt.subplots(figsize=get_figure_size("single", ratio=0.8))
@@ -971,32 +978,42 @@ class StandalonePlotManager:
                     r2_errs.append(0)
 
             # Plot 1: Test Loss vs Data Size
-            axes[0, 0].errorbar(
-                data_sizes, test_losses, yerr=test_loss_errs,
-                color=colors[0], linewidth=LINE_WIDTHS["thick"],
-                marker='o', markersize=MARKER_SIZES["normal"],
-                capsize=5, capthick=2
-            )
-            axes[0, 0].set_xlabel('Training Data Size', fontsize=FONT_SIZES["normal"])
-            axes[0, 0].set_ylabel('Test Loss (MSE)', fontsize=FONT_SIZES["normal"])
-            axes[0, 0].set_title('Test Loss vs Data Size', fontsize=FONT_SIZES["normal"])
-            axes[0, 0].set_xscale('log')
-            axes[0, 0].set_yscale('log')
-            axes[0, 0].grid(True, alpha=0.3)
+            if any(loss > 0 for loss in test_losses):
+                axes[0, 0].errorbar(
+                    data_sizes, test_losses, yerr=test_loss_errs,
+                    color=colors[0], linewidth=LINE_WIDTHS["thick"],
+                    marker='o', markersize=MARKER_SIZES["normal"],
+                    capsize=5, capthick=2
+                )
+                axes[0, 0].set_xlabel('Training Data Size', fontsize=FONT_SIZES["normal"])
+                axes[0, 0].set_ylabel('Test Loss (MSE)', fontsize=FONT_SIZES["normal"])
+                axes[0, 0].set_title('Test Loss vs Data Size', fontsize=FONT_SIZES["normal"])
+                axes[0, 0].set_xscale('log')
+                if all(loss > 0 for loss in test_losses):
+                    axes[0, 0].set_yscale('log')
+                axes[0, 0].grid(True, alpha=0.3)
+            else:
+                axes[0, 0].text(0.5, 0.5, 'No valid test loss data', 
+                              ha='center', va='center', transform=axes[0, 0].transAxes)
 
             # Plot 2: MAE vs Data Size  
-            axes[0, 1].errorbar(
-                data_sizes, maes, yerr=mae_errs,
-                color=colors[1], linewidth=LINE_WIDTHS["thick"],
-                marker='s', markersize=MARKER_SIZES["normal"],
-                capsize=5, capthick=2
-            )
-            axes[0, 1].set_xlabel('Training Data Size', fontsize=FONT_SIZES["normal"])
-            axes[0, 1].set_ylabel('Mean Absolute Error', fontsize=FONT_SIZES["normal"])
-            axes[0, 1].set_title('MAE vs Data Size', fontsize=FONT_SIZES["normal"])
-            axes[0, 1].set_xscale('log')
-            axes[0, 1].set_yscale('log')
-            axes[0, 1].grid(True, alpha=0.3)
+            if any(mae > 0 for mae in maes):
+                axes[0, 1].errorbar(
+                    data_sizes, maes, yerr=mae_errs,
+                    color=colors[1], linewidth=LINE_WIDTHS["thick"],
+                    marker='s', markersize=MARKER_SIZES["normal"],
+                    capsize=5, capthick=2
+                )
+                axes[0, 1].set_xlabel('Training Data Size', fontsize=FONT_SIZES["normal"])
+                axes[0, 1].set_ylabel('Mean Absolute Error', fontsize=FONT_SIZES["normal"])
+                axes[0, 1].set_title('MAE vs Data Size', fontsize=FONT_SIZES["normal"])
+                axes[0, 1].set_xscale('log')
+                if all(mae > 0 for mae in maes):
+                    axes[0, 1].set_yscale('log')
+                axes[0, 1].grid(True, alpha=0.3)
+            else:
+                axes[0, 1].text(0.5, 0.5, 'No valid MAE data', 
+                              ha='center', va='center', transform=axes[0, 1].transAxes)
 
             # Plot 3: R² Score vs Data Size
             axes[1, 0].errorbar(

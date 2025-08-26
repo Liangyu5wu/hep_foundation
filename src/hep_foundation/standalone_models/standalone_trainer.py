@@ -387,7 +387,7 @@ class StandaloneTrainer:
         verbose: str = "auto",
     ) -> dict[str, float]:
         """
-        Evaluate the trained model.
+        Evaluate the trained model with additional metrics including R².
 
         Args:
             dataset: Dataset to evaluate on
@@ -399,12 +399,53 @@ class StandaloneTrainer:
         self.logger.info("Evaluating model...")
 
         try:
-            # Evaluate model
+            # Evaluate model with TensorFlow metrics
             results = self.model.evaluate(
                 dataset,
                 verbose=1 if verbose == "auto" else verbose,
                 return_dict=True,
             )
+            
+            # Generate predictions to calculate additional metrics
+            predictions = self.model.predict(dataset, verbose=0)
+            
+            # Extract true labels from dataset
+            true_labels = []
+            for batch in dataset:
+                if isinstance(batch, tuple):
+                    _, labels = batch
+                    if isinstance(labels, (list, tuple)):
+                        true_labels.append(labels[0].numpy())
+                    else:
+                        true_labels.append(labels.numpy())
+                else:
+                    # If no labels in batch, skip additional metrics
+                    break
+            
+            if true_labels:
+                true_labels = np.concatenate(true_labels, axis=0)
+                predictions = predictions.flatten()[:len(true_labels)]
+                true_labels = true_labels.flatten()
+                
+                # Calculate R² score
+                try:
+                    # Manual R² calculation to avoid sklearn dependency
+                    ss_res = np.sum((true_labels - predictions) ** 2)
+                    ss_tot = np.sum((true_labels - np.mean(true_labels)) ** 2)
+                    r2_score = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+                    results['r2'] = float(r2_score)
+                except Exception as e:
+                    self.logger.warning(f"Failed to calculate R² score: {e}")
+                    results['r2'] = 0.0
+                
+                # Calculate additional correlation metrics
+                try:
+                    correlation_matrix = np.corrcoef(true_labels, predictions)
+                    correlation = correlation_matrix[0, 1] if not np.isnan(correlation_matrix[0, 1]) else 0.0
+                    results['correlation'] = float(correlation)
+                except Exception as e:
+                    self.logger.warning(f"Failed to calculate correlation: {e}")
+                    results['correlation'] = 0.0
 
             # Log results
             results_str = ", ".join(f"{k}: {v:.6f}" for k, v in results.items())
