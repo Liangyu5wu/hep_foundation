@@ -101,12 +101,12 @@ class StandaloneTrainer:
 
         # Create Adam optimizer with optional gradient clipping
         optimizer_kwargs = {
-            "learning_rate": self.training_config.learning_rate,
+            "learning_rate": float(self.training_config.learning_rate),
         }
 
         # Add gradient clipping if specified
         if self.training_config.gradient_clip_norm is not None:
-            optimizer_kwargs["clipnorm"] = self.training_config.gradient_clip_norm
+            optimizer_kwargs["clipnorm"] = float(self.training_config.gradient_clip_norm)
             self.logger.info(
                 f"Gradient clipping enabled with norm={self.training_config.gradient_clip_norm}"
             )
@@ -127,15 +127,16 @@ class StandaloneTrainer:
         scheduler_type = lr_config.get("type", "reduce_on_plateau")
 
         if scheduler_type == "reduce_on_plateau":
+            # Ensure proper type conversion for ReduceLROnPlateau parameters
             callback = tf.keras.callbacks.ReduceLROnPlateau(
-                monitor=lr_config.get("monitor", "val_loss"),
-                factor=lr_config.get("factor", 0.5),
-                patience=lr_config.get("patience", 10),
-                min_lr=lr_config.get("min_lr", 1e-6),
+                monitor=str(lr_config.get("monitor", "val_loss")),
+                factor=float(lr_config.get("factor", 0.5)),
+                patience=int(lr_config.get("patience", 10)),
+                min_lr=float(lr_config.get("min_lr", 1e-6)),
                 verbose=int(lr_config.get("verbose", True)),
-                mode=lr_config.get("mode", "min"),
-                min_delta=lr_config.get("min_delta", 1e-4),
-                cooldown=lr_config.get("cooldown", 0),
+                mode=str(lr_config.get("mode", "min")),
+                min_delta=float(lr_config.get("min_delta", 1e-4)),
+                cooldown=int(lr_config.get("cooldown", 0)),
             )
             self.logger.info(
                 f"Created ReduceLROnPlateau scheduler: monitor={lr_config.get('monitor', 'val_loss')}, "
@@ -143,12 +144,12 @@ class StandaloneTrainer:
             )
 
         elif scheduler_type == "exponential_decay":
-            # Create learning rate schedule
+            # Create learning rate schedule with proper type conversion
             lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate=self.training_config.learning_rate,
-                decay_steps=lr_config.get("decay_steps", 1000),
-                decay_rate=lr_config.get("decay_rate", 0.9),
-                staircase=lr_config.get("staircase", False),
+                initial_learning_rate=float(self.training_config.learning_rate),
+                decay_steps=int(lr_config.get("decay_steps", 1000)),
+                decay_rate=float(lr_config.get("decay_rate", 0.9)),
+                staircase=bool(lr_config.get("staircase", False)),
             )
             # Update optimizer with new schedule
             self.optimizer.learning_rate = lr_schedule
@@ -159,11 +160,11 @@ class StandaloneTrainer:
             return None  # No callback needed for schedule-based LR
 
         elif scheduler_type == "cosine_decay":
-            # Create learning rate schedule
+            # Create learning rate schedule with proper type conversion
             lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
-                initial_learning_rate=self.training_config.learning_rate,
-                decay_steps=lr_config.get("decay_steps", 10000),
-                alpha=lr_config.get("alpha", 0.0),
+                initial_learning_rate=float(self.training_config.learning_rate),
+                decay_steps=int(lr_config.get("decay_steps", 10000)),
+                alpha=float(lr_config.get("alpha", 0.0)),
             )
             # Update optimizer with new schedule
             self.optimizer.learning_rate = lr_schedule
@@ -199,10 +200,14 @@ class StandaloneTrainer:
 
         # Early stopping callback
         if validation_data is not None:
+            # Ensure proper type conversion for early stopping parameters
+            early_stopping_patience = int(self.training_config.early_stopping_patience)
+            early_stopping_min_delta = float(self.training_config.early_stopping_min_delta)
+            
             early_stopping = tf.keras.callbacks.EarlyStopping(
                 monitor="val_loss",
-                patience=self.training_config.early_stopping_patience,
-                min_delta=self.training_config.early_stopping_min_delta,
+                patience=early_stopping_patience,
+                min_delta=early_stopping_min_delta,
                 restore_best_weights=True,
                 verbose=1,
             )
@@ -274,7 +279,7 @@ class StandaloneTrainer:
             history = self.model.fit(
                 dataset,
                 validation_data=validation_data,
-                epochs=self.training_config.epochs,
+                epochs=int(self.training_config.epochs),
                 callbacks=training_callbacks,
                 verbose=1 if verbose == "auto" else verbose,
             )
