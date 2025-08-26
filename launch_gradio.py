@@ -489,13 +489,34 @@ with demo:
 
 def main():
     """Main function to launch the Gradio interface."""
-    # Launch the interface
-    demo.launch(
-        server_name="0.0.0.0",  # Allow access from other machines
-        server_port=7860,  # Default Gradio port
-        share=False,  # Don't create public link
-        debug=True,  # Enable debug mode
-    )
+    import os
+    
+    # Check if we're on NERSC (common environment variable)
+    is_nersc = any(var in os.environ for var in ['NERSC_HOST', 'SLURM_CLUSTER_NAME'])
+    
+    if is_nersc:
+        print("🔧 NERSC environment detected!")
+        print("💡 To access the interface:")
+        print("   1. On your LOCAL machine, run:")
+        print("      ssh -L 8860:localhost:7860 liangyu@login29.nersc.gov")
+        print("   2. Then open: http://localhost:8860 in your browser")
+        print("=" * 60)
+        
+        # Launch with localhost binding for SSH tunnel
+        demo.launch(
+            server_name="localhost",  # Only bind to localhost for NERSC
+            server_port=7860,  # Default Gradio port
+            share=False,  # Don't create public link
+            debug=False,  # Disable debug for cleaner output
+        )
+    else:
+        # Launch the interface for local development
+        demo.launch(
+            server_name="0.0.0.0",  # Allow access from other machines
+            server_port=7860,  # Default Gradio port
+            share=False,  # Don't create public link
+            debug=True,  # Enable debug mode
+        )
 
 
 if __name__ == "__main__":
