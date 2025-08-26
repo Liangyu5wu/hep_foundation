@@ -495,19 +495,41 @@ def main():
     is_nersc = any(var in os.environ for var in ['NERSC_HOST', 'SLURM_CLUSTER_NAME'])
     
     if is_nersc:
+        import socket
+        
+        # Find available port
+        def find_free_port(start_port=7860):
+            for port in range(start_port, start_port + 100):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    result = sock.bind(('localhost', port))
+                    sock.close()
+                    return port
+                except OSError:
+                    continue
+            return None
+        
+        free_port = find_free_port()
+        if free_port is None:
+            print("❌ No available ports found in range 7860-7960")
+            return
+            
         print("🔧 NERSC environment detected!")
-        print("💡 To access the interface:")
-        print("   1. On your LOCAL machine, run:")
-        print("      ssh -L 8860:localhost:7860 liangyu@login29.nersc.gov")
-        print("   2. Then open: http://localhost:8860 in your browser")
-        print("=" * 60)
+        print(f"📡 Using port: {free_port}")
+        print("💡 To access the interface from your LOCAL machine:")
+        print(f"   1. Open a NEW terminal on your local machine")
+        print(f"   2. Run: ssh -L 8860:localhost:{free_port} liangyu@{os.environ.get('HOSTNAME', 'login29')}.nersc.gov")
+        print(f"   3. Keep that SSH connection open")
+        print(f"   4. Open browser: http://localhost:8860")
+        print("=" * 70)
         
         # Launch with localhost binding for SSH tunnel
         demo.launch(
             server_name="localhost",  # Only bind to localhost for NERSC
-            server_port=7860,  # Default Gradio port
+            server_port=free_port,  # Use available port
             share=False,  # Don't create public link
             debug=False,  # Disable debug for cleaner output
+            show_error=True,  # Show errors for debugging
         )
     else:
         # Launch the interface for local development
