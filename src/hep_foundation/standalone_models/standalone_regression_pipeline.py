@@ -533,32 +533,61 @@ class StandaloneRegressionPipeline:
     ) -> tuple[bool, dict[int, dict[str, Any]], dict[int, dict[str, np.ndarray]]]:
         """Run data efficiency study across different training data sizes."""
         data_sizes = evaluation_config.regression_data_sizes
+        k_folds = getattr(evaluation_config, 'k_fold', 3)  # Default 3-fold CV
+        use_k_fold = getattr(evaluation_config, 'use_k_fold_cv', True)
+        
         self.logger.info(f"Running data efficiency study for sizes: {data_sizes}")
+        if use_k_fold:
+            self.logger.info(f"Using {k_folds}-fold cross-validation")
 
         all_results = {}
         all_predictions = {}
+        k_fold_results = {}
 
         for data_size in data_sizes:
             self.logger.info("=" * 50)
             self.logger.info(f"Training with {data_size} events")
             self.logger.info("=" * 50)
 
-            success, results, predictions = self._train_and_evaluate_single_size(
-                model,
-                training_config,
-                evaluation_config,
-                train_dataset,
-                val_dataset,
-                test_dataset,
-                data_size,
-                eval_dir,
-            )
+            if use_k_fold and data_size > 1000:  # Only use k-fold for larger datasets
+                success, results, predictions, kfold_stats = self._train_and_evaluate_with_kfold(
+                    model,
+                    training_config,
+                    evaluation_config,
+                    train_dataset,
+                    val_dataset,
+                    test_dataset,
+                    data_size,
+                    k_folds,
+                    eval_dir,
+                )
+                if success:
+                    k_fold_results[data_size] = kfold_stats
+            else:
+                # Single run for small datasets
+                success, results, predictions = self._train_and_evaluate_single_size(
+                    model,
+                    training_config,
+                    evaluation_config,
+                    train_dataset,
+                    val_dataset,
+                    test_dataset,
+                    data_size,
+                    eval_dir,
+                )
 
             if success:
                 all_results[data_size] = results
                 all_predictions[data_size] = predictions
             else:
                 self.logger.warning(f"Failed to train model with {data_size} events")
+
+        # Save k-fold results for plotting
+        if k_fold_results:
+            kfold_results_file = eval_dir / "k_fold_statistics.json"
+            with open(kfold_results_file, "w") as f:
+                json.dump(self._make_json_serializable(k_fold_results), f, indent=2)
+            self.logger.info(f"K-fold statistics saved to: {kfold_results_file}")
 
         self.logger.info("Data efficiency study completed")
         return True, all_results, all_predictions
@@ -670,6 +699,221 @@ class StandaloneRegressionPipeline:
             self.logger.error(f"Training failed for data size {data_size}: {e}")
             return False, {}, {}
 
+    def _train_and_evaluate_with_kfold(
+        self,
+        model: StandaloneDNNRegressor,
+        training_config: StandaloneTrainingConfig,
+        evaluation_config: StandaloneEvaluationConfig,
+        train_dataset: tf.data.Dataset,
+        val_dataset: tf.data.Dataset,
+        test_dataset: tf.data.Dataset,
+        data_size: int,
+        k_folds: int,
+        eval_dir: Path,
+    ) -> tuple[bool, dict[str, Any], dict[str, np.ndarray], dict[str, list[float]]]:
+        """Train and evaluate model using k-fold cross-validation."""
+        try:
+            self.logger.info(f"Starting {k_folds}-fold cross-validation for {data_size} events")
+            
+            # Convert train dataset to list of examples for shuffling and splitting
+            train_examples = []
+            for batch in train_dataset.unbatch().take(data_size):
+                train_examples.append(batch)
+            
+            if len(train_examples) < data_size:
+                self.logger.warning(f"Only {len(train_examples)} events available, less than requested {data_size}")
+                data_size = len(train_examples)
+            
+            # Shuffle examples
+            np.random.shuffle(train_examples)
+            
+            # Split into k folds
+            fold_size = data_size // k_folds
+            fold_results = []
+            fold_predictions_list = []
+            
+            for fold in range(k_folds):
+                self.logger.info(f"Training fold {fold + 1}/{k_folds}")
+                
+                # Split data for this fold
+                start_idx = fold * fold_size
+                end_idx = (fold + 1) * fold_size if fold < k_folds - 1 else data_size
+                
+                # Create validation set for this fold
+                fold_val_examples = train_examples[start_idx:end_idx]
+                
+                # Create training set (all other folds)
+                fold_train_examples = train_examples[:start_idx] + train_examples[end_idx:]
+                
+                # Convert back to datasets
+                def create_dataset_from_examples(examples, batch_size):
+                    if not examples:
+                        return None
+                    
+                    # Extract features and labels
+                    features = []
+                    labels = []
+                    
+                    for example in examples:
+                        if isinstance(example, tuple):
+                            feat, lab = example
+                            features.append(feat)
+                            labels.append(lab)
+                        else:
+                            features.append(example)
+                    
+                    # Create dataset
+                    if labels:
+                        dataset = tf.data.Dataset.from_tensor_slices((
+                            tf.stack(features), 
+                            tf.stack(labels)
+                        ))
+                    else:
+                        dataset = tf.data.Dataset.from_tensor_slices(tf.stack(features))
+                    
+                    return dataset.batch(batch_size)
+                
+                fold_train_ds = create_dataset_from_examples(fold_train_examples, training_config.batch_size)
+                fold_val_ds = create_dataset_from_examples(fold_val_examples, training_config.batch_size)
+                
+                # Create fresh model for this fold
+                config_dict = model.get_config()
+                fresh_config = StandaloneDNNConfig(
+                    model_type="standalone_dnn_regressor",
+                    architecture={
+                        "input_shape": config_dict["input_shape"],
+                        "output_shape": config_dict["output_shape"],
+                        "hidden_layers": config_dict["hidden_layers"],
+                        "activation": config_dict["activation"],
+                        "output_activation": config_dict["output_activation"],
+                        "name": config_dict["name"],
+                    },
+                    hyperparameters={
+                        "dropout_rate": config_dict["dropout_rate"],
+                        "l2_regularization": config_dict["l2_regularization"],
+                        "batch_normalization": config_dict["batch_normalization"],
+                    },
+                )
+                fold_model = StandaloneDNNRegressor(fresh_config)
+                fold_model.build(model.input_shape)
+                
+                # Create trainer with fixed epochs
+                eval_training_config = StandaloneTrainingConfig(
+                    batch_size=training_config.batch_size,
+                    learning_rate=training_config.learning_rate,
+                    epochs=evaluation_config.fixed_epochs,
+                    early_stopping_patience=evaluation_config.fixed_epochs + 1,
+                    early_stopping_min_delta=0,
+                    plot_training=False,  # Don't create plots for each fold
+                    gradient_clip_norm=training_config.gradient_clip_norm,
+                    lr_scheduler=training_config.lr_scheduler,
+                )
+                
+                trainer = StandaloneTrainer(fold_model.model, eval_training_config)
+                
+                # Train this fold
+                fold_success = trainer.train(
+                    dataset=fold_train_ds,
+                    validation_data=fold_val_ds,
+                    training_history_dir=eval_dir / "kfold_histories",
+                    model_name=f"fold_{fold+1}_of_{k_folds}_size_{data_size}",
+                    dataset_id=f"{data_size}_events_fold_{fold+1}",
+                    experiment_id="kfold_cv",
+                    save_individual_history=False,  # Don't save individual fold histories
+                )
+                
+                if not fold_success:
+                    self.logger.warning(f"Fold {fold+1} training failed")
+                    continue
+                
+                # Evaluate this fold on test set
+                fold_test_results = trainer.evaluate(test_dataset)
+                fold_predictions = trainer.predict(test_dataset)
+                
+                fold_results.append(fold_test_results)
+                fold_predictions_list.append(fold_predictions)
+                
+                self.logger.info(f"Fold {fold+1} completed - Test Loss: {fold_test_results.get('test_loss', 'N/A'):.4f}")
+            
+            if not fold_results:
+                self.logger.error("All folds failed")
+                return False, {}, {}, {}
+            
+            # Calculate k-fold statistics
+            kfold_stats = self._calculate_kfold_statistics(fold_results)
+            self.logger.info(f"K-fold CV completed - Mean Test Loss: {kfold_stats['test_loss_mean']:.4f} ± {kfold_stats['test_loss_std']:.4f}")
+            
+            # Extract true labels from test dataset (same for all folds)
+            true_labels = []
+            for batch in test_dataset:
+                if isinstance(batch, tuple):
+                    _, labels = batch
+                    if isinstance(labels, (list, tuple)):
+                        true_labels.append(labels[0].numpy())
+                    else:
+                        true_labels.append(labels.numpy())
+            true_labels = np.concatenate(true_labels, axis=0)
+            
+            # Use the best fold's predictions (lowest test loss)
+            best_fold_idx = np.argmin([result.get('test_loss', result.get('test_mse', float('inf'))) for result in fold_results])
+            best_predictions = fold_predictions_list[best_fold_idx]
+            
+            # Prepare results using k-fold averages
+            results = {
+                "data_size": data_size,
+                "test_metrics": {
+                    "test_loss": kfold_stats['test_loss_mean'],
+                    "test_mse": kfold_stats.get('test_mse_mean', kfold_stats['test_loss_mean']),
+                    "mae": kfold_stats.get('mae_mean', 0),
+                    "r2": kfold_stats.get('r2_mean', 0),
+                },
+                "kfold_statistics": kfold_stats,
+                "n_successful_folds": len(fold_results),
+            }
+            
+            predictions_dict = {
+                "predictions": best_predictions,
+                "targets": true_labels,
+            }
+            
+            # Convert kfold_stats for returning
+            kfold_return_stats = {
+                'test_loss': [r.get('test_loss', r.get('test_mse', 0)) for r in fold_results],
+                'mae': [r.get('mae', 0) for r in fold_results],
+                'mse': [r.get('test_mse', r.get('test_loss', 0)) for r in fold_results],
+                'r2': [r.get('r2', 0) for r in fold_results],
+            }
+            
+            return True, results, predictions_dict, kfold_return_stats
+            
+        except Exception as e:
+            self.logger.error(f"K-fold cross-validation failed for data size {data_size}: {e}")
+            return False, {}, {}, {}
+
+    def _calculate_kfold_statistics(self, fold_results: list[dict]) -> dict[str, float]:
+        """Calculate statistics across k-fold results."""
+        if not fold_results:
+            return {}
+        
+        # Extract metrics from all folds
+        metrics_lists = {}
+        for result in fold_results:
+            for key, value in result.items():
+                if isinstance(value, (int, float)):
+                    if key not in metrics_lists:
+                        metrics_lists[key] = []
+                    metrics_lists[key].append(value)
+        
+        # Calculate mean and std for each metric
+        stats = {}
+        for metric, values in metrics_lists.items():
+            stats[f"{metric}_mean"] = np.mean(values)
+            stats[f"{metric}_std"] = np.std(values)
+            stats[f"{metric}_min"] = np.min(values)
+            stats[f"{metric}_max"] = np.max(values)
+        
+        return stats
+
     def _create_comprehensive_plots(
         self,
         main_results: dict[str, Any],
@@ -693,6 +937,26 @@ class StandaloneRegressionPipeline:
                     plots_dir / "main_model_predictions.png",
                     f"Main Model Predictions ({total_train_events} events)",
                     evaluation_config.prediction_sample_size,
+                )
+                
+                # Create 2D histogram for main model
+                self.plot_manager.create_prediction_vs_true_2d_histogram(
+                    main_predictions["predictions"],
+                    main_predictions["targets"],
+                    plots_dir / "main_model_predictions_2d_histogram.png",
+                    f"Main Model Predictions ({total_train_events} events)",
+                    n_bins=60,
+                    sample_size=evaluation_config.prediction_sample_size,
+                )
+                
+                # Create relative error histogram for main model
+                self.plot_manager.create_relative_error_histogram(
+                    main_predictions["predictions"],
+                    main_predictions["targets"],
+                    plots_dir / "main_model_relative_errors.png",
+                    f"Main Model Relative Errors ({total_train_events} events)",
+                    n_bins=100,
+                    max_relative_error=2.0,
                 )
 
             # Main model training history
@@ -718,6 +982,31 @@ class StandaloneRegressionPipeline:
                     plots_dir / "data_efficiency_with_main_model.png",
                     "Data Efficiency (Including Main Model)",
                 )
+                
+                # Load k-fold results if available
+                kfold_results_file = eval_dir / "k_fold_statistics.json"
+                k_fold_data = None
+                if kfold_results_file.exists():
+                    try:
+                        with open(kfold_results_file, 'r') as f:
+                            k_fold_data = json.load(f)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load k-fold results: {e}")
+                
+                # Create comprehensive data size comparison with error bars
+                efficiency_metrics = {}
+                for data_size, results in all_results.items():
+                    efficiency_metrics[data_size] = results["test_metrics"]
+                
+                # Add main model
+                efficiency_metrics[total_train_events] = main_results["test_metrics"]
+                
+                self.plot_manager.create_data_size_comparison_summary(
+                    efficiency_metrics,
+                    plots_dir / "data_size_effect_analysis_with_errorbars.png",
+                    "Data Size Effect Analysis",
+                    k_fold_data,
+                )
                 # Multi-size prediction comparison (efficiency models only)
                 if evaluation_config.create_detailed_plots and all_predictions:
                     self.plot_manager.create_multi_size_comparison_plot(
@@ -735,6 +1024,26 @@ class StandaloneRegressionPipeline:
                         plots_dir / f"error_analysis_{data_size}_events.png",
                         f"Error Analysis ({data_size} events)",
                         evaluation_config.error_analysis_bins,
+                    )
+                    
+                    # Create relative error histogram for each data size
+                    self.plot_manager.create_relative_error_histogram(
+                        predictions_dict["predictions"],
+                        predictions_dict["targets"],
+                        plots_dir / f"relative_errors_{data_size}_events.png",
+                        f"Relative Errors ({data_size} events)",
+                        n_bins=80,
+                        max_relative_error=1.5,
+                    )
+                    
+                    # Create 2D histogram for each data size
+                    self.plot_manager.create_prediction_vs_true_2d_histogram(
+                        predictions_dict["predictions"],
+                        predictions_dict["targets"],
+                        plots_dir / f"predictions_2d_{data_size}_events.png",
+                        f"Predictions vs True ({data_size} events)",
+                        n_bins=40,
+                        sample_size=min(5000, evaluation_config.prediction_sample_size),
                     )
 
             # Main model error analysis

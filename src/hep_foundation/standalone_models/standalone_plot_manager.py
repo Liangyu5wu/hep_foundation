@@ -659,3 +659,405 @@ class StandalonePlotManager:
 
         except Exception as e:
             self.logger.error(f"Failed to create multi-size comparison plot: {e}")
+
+    def create_prediction_vs_true_2d_histogram(
+        self,
+        predictions: np.ndarray,
+        targets: np.ndarray,
+        output_path: Path,
+        title_prefix: str = "Prediction vs True Values",
+        n_bins: int = 50,
+        sample_size: int = 10000,
+    ) -> None:
+        """
+        Create 2D histogram of predictions vs true values.
+
+        Args:
+            predictions: Model predictions
+            targets: True target values
+            output_path: Path to save the plot
+            title_prefix: Prefix for the plot title
+            n_bins: Number of bins for 2D histogram
+            sample_size: Number of samples to use (for performance)
+        """
+        try:
+            # Sample data if too large
+            if len(predictions) > sample_size:
+                indices = np.random.choice(len(predictions), sample_size, replace=False)
+                pred_sample = predictions[indices].flatten()
+                target_sample = targets[indices].flatten()
+            else:
+                pred_sample = predictions.flatten()
+                target_sample = targets.flatten()
+
+            # Create figure
+            fig, ax = plt.subplots(figsize=get_figure_size("single", ratio=1.0))
+
+            # Create 2D histogram
+            h, xedges, yedges = np.histogram2d(
+                target_sample, pred_sample, bins=n_bins, density=True
+            )
+
+            # Create mesh for plotting
+            X, Y = np.meshgrid(xedges, yedges)
+            im = ax.pcolormesh(X, Y, h.T, cmap='viridis', shading='auto')
+
+            # Add colorbar
+            cbar = plt.colorbar(im, ax=ax)
+            cbar.set_label('Density', fontsize=FONT_SIZES["normal"])
+
+            # Perfect prediction line
+            min_val = min(np.min(target_sample), np.min(pred_sample))
+            max_val = max(np.max(target_sample), np.max(pred_sample))
+            ax.plot(
+                [min_val, max_val],
+                [min_val, max_val],
+                'r--',
+                linewidth=LINE_WIDTHS["thick"],
+                label='Perfect Prediction'
+            )
+
+            # Formatting
+            ax.set_xlabel('True Values', fontsize=FONT_SIZES["normal"])
+            ax.set_ylabel('Predictions', fontsize=FONT_SIZES["normal"])
+            ax.set_title(f'{title_prefix} - 2D Histogram', fontsize=FONT_SIZES["large"])
+            ax.legend(fontsize=FONT_SIZES["small"])
+            ax.grid(True, alpha=0.3)
+
+            # Calculate and display R²
+            r2 = stats.pearsonr(target_sample, pred_sample)[0] ** 2
+            ax.text(
+                0.05, 0.95,
+                f'R² = {r2:.3f}\nN = {len(target_sample):,}',
+                transform=ax.transAxes,
+                fontsize=FONT_SIZES["small"],
+                verticalalignment='top',
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8)
+            )
+
+            # Adjust layout and save
+            plt.tight_layout()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+
+            self.logger.info(f"2D histogram plot saved to: {output_path}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to create 2D histogram plot: {e}")
+
+    def create_relative_error_histogram(
+        self,
+        predictions: np.ndarray,
+        targets: np.ndarray,
+        output_path: Path,
+        title_prefix: str = "Relative Error Analysis",
+        n_bins: int = 100,
+        max_relative_error: float = 2.0,
+    ) -> None:
+        """
+        Create relative error histogram (pred-true)/true * 100%.
+
+        Args:
+            predictions: Model predictions
+            targets: True target values
+            output_path: Path to save the plot
+            title_prefix: Prefix for the plot title
+            n_bins: Number of bins for histogram
+            max_relative_error: Maximum relative error to display (to clip outliers)
+        """
+        try:
+            # Calculate relative errors as (pred - true) / true * 100%
+            # Add small epsilon to avoid division by zero
+            epsilon = 1e-8
+            relative_errors = (predictions - targets) / (np.abs(targets) + epsilon) * 100.0
+
+            # Flatten arrays
+            relative_errors = relative_errors.flatten()
+
+            # Remove extreme outliers
+            valid_mask = np.isfinite(relative_errors)
+            relative_errors = relative_errors[valid_mask]
+
+            # Clip to reasonable range
+            relative_errors_clipped = np.clip(
+                relative_errors, 
+                -max_relative_error * 100, 
+                max_relative_error * 100
+            )
+
+            # Create figure
+            fig, axes = plt.subplots(2, 1, figsize=get_figure_size("single", ratio=1.2))
+            colors = get_color_cycle("high_contrast", 3)
+
+            # Plot 1: Full range histogram
+            axes[0].hist(
+                relative_errors_clipped,
+                bins=n_bins,
+                alpha=0.7,
+                color=colors[0],
+                density=True,
+                edgecolor='black',
+                linewidth=0.5
+            )
+            
+            # Add vertical line at zero
+            axes[0].axvline(
+                0, color='red', linestyle='--', 
+                linewidth=LINE_WIDTHS["thick"], 
+                label='Perfect Prediction'
+            )
+
+            # Calculate and display statistics
+            mean_rel_error = np.mean(relative_errors_clipped)
+            std_rel_error = np.std(relative_errors_clipped)
+            median_rel_error = np.median(relative_errors_clipped)
+
+            axes[0].axvline(
+                mean_rel_error, color='orange', linestyle='-', 
+                linewidth=LINE_WIDTHS["thick"], 
+                label=f'Mean = {mean_rel_error:.1f}%'
+            )
+            axes[0].axvline(
+                median_rel_error, color='green', linestyle='-', 
+                linewidth=LINE_WIDTHS["thick"], 
+                label=f'Median = {median_rel_error:.1f}%'
+            )
+
+            axes[0].set_xlabel('Relative Error (%)', fontsize=FONT_SIZES["normal"])
+            axes[0].set_ylabel('Density', fontsize=FONT_SIZES["normal"])
+            axes[0].set_title(
+                f'{title_prefix} - Full Range', 
+                fontsize=FONT_SIZES["normal"]
+            )
+            axes[0].legend(fontsize=FONT_SIZES["small"])
+            axes[0].grid(True, alpha=0.3)
+
+            # Add statistics text box
+            stats_text = (
+                f'Statistics:\n'
+                f'Mean: {mean_rel_error:.2f}%\n'
+                f'Std: {std_rel_error:.2f}%\n'
+                f'Median: {median_rel_error:.2f}%\n'
+                f'N valid: {len(relative_errors_clipped):,}'
+            )
+            axes[0].text(
+                0.05, 0.95,
+                stats_text,
+                transform=axes[0].transAxes,
+                fontsize=FONT_SIZES["small"],
+                verticalalignment='top',
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.9)
+            )
+
+            # Plot 2: Zoomed in histogram around zero
+            zoom_range = min(50, np.percentile(np.abs(relative_errors_clipped), 90))
+            mask_zoom = np.abs(relative_errors_clipped) <= zoom_range
+            
+            if np.sum(mask_zoom) > 0:
+                axes[1].hist(
+                    relative_errors_clipped[mask_zoom],
+                    bins=n_bins//2,
+                    alpha=0.7,
+                    color=colors[1],
+                    density=True,
+                    edgecolor='black',
+                    linewidth=0.5
+                )
+
+                axes[1].axvline(
+                    0, color='red', linestyle='--', 
+                    linewidth=LINE_WIDTHS["thick"], 
+                    label='Perfect Prediction'
+                )
+
+                axes[1].set_xlabel('Relative Error (%)', fontsize=FONT_SIZES["normal"])
+                axes[1].set_ylabel('Density', fontsize=FONT_SIZES["normal"])
+                axes[1].set_title(
+                    f'Zoomed View (±{zoom_range:.0f}%)', 
+                    fontsize=FONT_SIZES["normal"]
+                )
+                axes[1].legend(fontsize=FONT_SIZES["small"])
+                axes[1].grid(True, alpha=0.3)
+
+                # Calculate percentiles for zoomed view
+                p68 = np.percentile(np.abs(relative_errors_clipped[mask_zoom]), 68)
+                p90 = np.percentile(np.abs(relative_errors_clipped[mask_zoom]), 90)
+                
+                zoom_stats_text = (
+                    f'Central region:\n'
+                    f'68% within ±{p68:.1f}%\n'
+                    f'90% within ±{p90:.1f}%'
+                )
+                axes[1].text(
+                    0.95, 0.95,
+                    zoom_stats_text,
+                    transform=axes[1].transAxes,
+                    fontsize=FONT_SIZES["small"],
+                    verticalalignment='top',
+                    horizontalalignment='right',
+                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.9)
+                )
+
+            # Overall title
+            fig.suptitle(f'{title_prefix}', fontsize=FONT_SIZES["large"])
+
+            # Adjust layout and save
+            plt.tight_layout()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+
+            self.logger.info(f"Relative error histogram saved to: {output_path}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to create relative error histogram: {e}")
+
+    def create_data_size_comparison_summary(
+        self,
+        data_size_results: dict[int, dict[str, float]],
+        output_path: Path,
+        title_prefix: str = "Data Size Effect Analysis",
+        k_fold_results: Optional[dict[int, dict[str, list[float]]]] = None,
+    ) -> None:
+        """
+        Create comprehensive data size comparison with k-fold error bars.
+
+        Args:
+            data_size_results: Dictionary with data_size -> metrics
+            output_path: Path to save the plot
+            title_prefix: Prefix for the plot title
+            k_fold_results: Optional k-fold results for error bars
+        """
+        try:
+            data_sizes = sorted(data_size_results.keys())
+            if not data_sizes:
+                self.logger.warning("No data size results available")
+                return
+
+            # Create 2x2 subplot
+            fig, axes = plt.subplots(2, 2, figsize=get_figure_size("double", ratio=1.0))
+            colors = get_color_cycle("high_contrast", 4)
+
+            # Extract metrics
+            test_losses = []
+            maes = []
+            mses = []
+            r2_scores = []
+
+            test_loss_errs = []
+            mae_errs = []
+            mse_errs = []
+            r2_errs = []
+
+            for size in data_sizes:
+                result = data_size_results[size]
+                test_losses.append(result.get('test_loss', result.get('test_mse', 0)))
+                maes.append(result.get('mae', 0))
+                mses.append(result.get('mse', result.get('test_mse', 0)))
+                r2_scores.append(result.get('r2', 0))
+
+                # Add error bars if k-fold data available
+                if k_fold_results and size in k_fold_results:
+                    kfold_data = k_fold_results[size]
+                    test_loss_errs.append(np.std(kfold_data.get('test_loss', [0])))
+                    mae_errs.append(np.std(kfold_data.get('mae', [0])))
+                    mse_errs.append(np.std(kfold_data.get('mse', [0])))
+                    r2_errs.append(np.std(kfold_data.get('r2', [0])))
+                else:
+                    test_loss_errs.append(0)
+                    mae_errs.append(0)
+                    mse_errs.append(0)
+                    r2_errs.append(0)
+
+            # Plot 1: Test Loss vs Data Size
+            axes[0, 0].errorbar(
+                data_sizes, test_losses, yerr=test_loss_errs,
+                color=colors[0], linewidth=LINE_WIDTHS["thick"],
+                marker='o', markersize=MARKER_SIZES["normal"],
+                capsize=5, capthick=2
+            )
+            axes[0, 0].set_xlabel('Training Data Size', fontsize=FONT_SIZES["normal"])
+            axes[0, 0].set_ylabel('Test Loss (MSE)', fontsize=FONT_SIZES["normal"])
+            axes[0, 0].set_title('Test Loss vs Data Size', fontsize=FONT_SIZES["normal"])
+            axes[0, 0].set_xscale('log')
+            axes[0, 0].set_yscale('log')
+            axes[0, 0].grid(True, alpha=0.3)
+
+            # Plot 2: MAE vs Data Size  
+            axes[0, 1].errorbar(
+                data_sizes, maes, yerr=mae_errs,
+                color=colors[1], linewidth=LINE_WIDTHS["thick"],
+                marker='s', markersize=MARKER_SIZES["normal"],
+                capsize=5, capthick=2
+            )
+            axes[0, 1].set_xlabel('Training Data Size', fontsize=FONT_SIZES["normal"])
+            axes[0, 1].set_ylabel('Mean Absolute Error', fontsize=FONT_SIZES["normal"])
+            axes[0, 1].set_title('MAE vs Data Size', fontsize=FONT_SIZES["normal"])
+            axes[0, 1].set_xscale('log')
+            axes[0, 1].set_yscale('log')
+            axes[0, 1].grid(True, alpha=0.3)
+
+            # Plot 3: R² Score vs Data Size
+            axes[1, 0].errorbar(
+                data_sizes, r2_scores, yerr=r2_errs,
+                color=colors[2], linewidth=LINE_WIDTHS["thick"],
+                marker='^', markersize=MARKER_SIZES["normal"],
+                capsize=5, capthick=2
+            )
+            axes[1, 0].set_xlabel('Training Data Size', fontsize=FONT_SIZES["normal"])
+            axes[1, 0].set_ylabel('R² Score', fontsize=FONT_SIZES["normal"])
+            axes[1, 0].set_title('R² Score vs Data Size', fontsize=FONT_SIZES["normal"])
+            axes[1, 0].set_xscale('log')
+            axes[1, 0].grid(True, alpha=0.3)
+
+            # Plot 4: Summary table
+            axes[1, 1].axis('off')
+            
+            # Create summary table
+            table_data = []
+            for i, size in enumerate(data_sizes):
+                size_str = f"{size//1000}k" if size >= 1000 else str(size)
+                row = [
+                    size_str,
+                    f"{test_losses[i]:.2e}",
+                    f"{maes[i]:.2e}",
+                    f"{r2_scores[i]:.3f}"
+                ]
+                table_data.append(row)
+
+            table = axes[1, 1].table(
+                cellText=table_data,
+                colLabels=['Data Size', 'Test Loss', 'MAE', 'R²'],
+                cellLoc='center',
+                loc='center',
+                bbox=[0, 0.2, 1, 0.7]
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(FONT_SIZES["small"])
+            table.scale(1, 1.5)
+            
+            # Style the table
+            for i in range(len(data_sizes) + 1):
+                for j in range(4):
+                    if i == 0:  # Header
+                        table[(i, j)].set_facecolor('#E6E6FA')
+                        table[(i, j)].set_text_props(weight='bold')
+                    else:
+                        table[(i, j)].set_facecolor('#F8F8FF')
+
+            axes[1, 1].set_title('Summary Statistics', fontsize=FONT_SIZES["normal"])
+
+            # Overall title
+            fig.suptitle(f'{title_prefix}', fontsize=FONT_SIZES["large"])
+
+            # Adjust layout and save
+            plt.tight_layout()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+
+            self.logger.info(f"Data size comparison summary saved to: {output_path}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to create data size comparison summary: {e}")

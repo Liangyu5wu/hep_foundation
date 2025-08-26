@@ -1,0 +1,111 @@
+# Test Configuration for Leading Jet Pt Standalone Regression
+# Quick test with minimal settings for development and verification
+
+name: "test_leading_jet_pt"
+description: "Quick test of leading jet pt standalone regression with k-fold CV"
+version: "1.0"
+created_by: "Liangyu"
+
+# Dataset Configuration - Minimal for testing
+dataset:
+  run_numbers: !python get_run_numbers()[-2:]  # Just latest 2 runs for speed
+  signal_keys: ["zprime_tt", "wprime_taunu"]  # 2 signals for testing
+  catalog_limit: 3  # Very small for testing
+  event_limit: 1000  # Limit events per catalog for faster testing
+  signal_event_limit: 2000  # Higher limit for signal data
+  validation_fraction: 0.2
+  test_fraction: 0.2
+  shuffle_buffer: 2000  # Small buffer
+  plot_distributions: true
+  save_raw_samples: true
+  include_labels: true
+  hdf5_compression: false  # Disable compression for faster testing
+
+# Task Configuration - Same as main but simplified
+task:
+  event_filters: {}
+
+  input_features: []
+
+  input_array_aggregators:
+    - input_branches:
+        - "InDetTrackParticlesAuxDyn.d0"
+        - "InDetTrackParticlesAuxDyn.z0"
+        - "InDetTrackParticlesAuxDyn.phi"
+        - "derived.InDetTrackParticlesAuxDyn.eta"
+        - "derived.InDetTrackParticlesAuxDyn.pt"
+        - "derived.InDetTrackParticlesAuxDyn.reducedChiSquared"
+      filter_branches:
+        - {"branch": "InDetTrackParticlesAuxDyn.d0", "min": -5.0, "max": 5.0}
+        - {"branch": "InDetTrackParticlesAuxDyn.z0", "min": -100.0, "max": 100.0}
+        - {"branch": "derived.InDetTrackParticlesAuxDyn.pt", "min": 0.5}
+      sort_by_branch: {"branch": "derived.InDetTrackParticlesAuxDyn.pt"}
+      min_length: 10  # Fewer tracks for testing
+      max_length: 30
+
+  label_features:
+    - []
+
+  label_array_aggregators:
+    - - input_branches:
+          - "AnalysisJetsAuxDyn.pt"
+        filter_branches:
+          - {"branch": "AnalysisJetsAuxDyn.pt", "min": 20.0}
+        sort_by_branch: {"branch": "AnalysisJetsAuxDyn.pt"}
+        min_length: 1
+        max_length: 1
+
+# Model Configuration - Smaller architecture for testing
+models:
+  standalone_dnn:
+    model_type: "standalone_dnn_regressor"
+    architecture:
+      hidden_layers: [128, 64, 32]  # Smaller architecture
+      activation: "relu"
+      output_activation: "linear"
+      name: "test_leading_jet_pt_regressor"
+    hyperparameters:
+      dropout_rate: 0.1
+      l2_regularization: 0.0001
+      batch_normalization: true
+
+# Training Configuration - Fast training for testing
+training:
+  standalone_dnn:
+    batch_size: 256
+    learning_rate: 0.001
+    epochs: 15  # Short training for testing main model
+    early_stopping:
+      patience: 5
+      min_delta: 0.001
+    gradient_clip_norm: 1.0
+    lr_scheduler:
+      type: "reduce_on_plateau"
+      monitor: "val_loss"
+      factor: 0.7
+      patience: 3
+      min_lr: 1e-5
+      verbose: true
+    plot_training: true
+
+# Evaluation Configuration - Test data size study with k-fold
+evaluation:
+  # Small data sizes for testing
+  regression_data_sizes: [500, 2000, 5000]
+  fixed_epochs: 8  # Very few epochs for testing
+  
+  # K-fold settings
+  use_k_fold_cv: true
+  k_fold: 3  # 3-fold for testing
+  
+  # Plot settings
+  create_detailed_plots: true
+  error_analysis_bins: 50
+  prediction_sample_size: 500
+  include_feature_importance: false
+
+# Pipeline Settings
+pipeline:
+  delete_catalogs: false
+  experiments_output_dir: "_test_standalone_experiments"
+  processed_data_parent_dir: null

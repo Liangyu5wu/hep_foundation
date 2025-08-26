@@ -1,0 +1,115 @@
+# Leading Jet Pt Standalone Regression Configuration
+# Comprehensive configuration for standalone DNN regression of leading jet pt
+# Uses latest 5 run numbers with all available catalogs and multiple data sizes for comparison
+
+name: "leading_jet_pt_comprehensive"
+description: "Comprehensive standalone regression for leading jet pt prediction with data size analysis"
+version: "1.0"
+created_by: "Liangyu"
+
+# Dataset Configuration - Latest 5 run numbers with all catalogs
+dataset:
+  run_numbers: !python get_run_numbers()[-5:]  # Latest 5 ATLAS run numbers
+  signal_keys: ["zprime_tt", "wprime_taunu", "DMA", "leptoquark", "dm_4top_scalar"]  # All signals
+  catalog_limit: null  # Use ALL available catalogs for comprehensive training
+  event_limit: null  # No limit on events per catalog
+  signal_event_limit: null  # No limit on signal events
+  validation_fraction: 0.15
+  test_fraction: 0.15
+  shuffle_buffer: 100000  # Large shuffle buffer for better mixing
+  plot_distributions: true
+  save_raw_samples: true
+  include_labels: true
+  hdf5_compression: true  # Enable compression for storage efficiency
+
+# Task Configuration - Optimized for leading jet pt regression
+task:
+  event_filters: {}
+
+  input_features: []  # Using array-based approach
+
+  # High-quality track features for leading jet pt prediction
+  input_array_aggregators:
+    - input_branches:
+        - "InDetTrackParticlesAuxDyn.d0"
+        - "InDetTrackParticlesAuxDyn.z0"
+        - "InDetTrackParticlesAuxDyn.phi" 
+        - "derived.InDetTrackParticlesAuxDyn.eta"
+        - "derived.InDetTrackParticlesAuxDyn.pt"
+        - "derived.InDetTrackParticlesAuxDyn.reducedChiSquared"
+      filter_branches:
+        - {"branch": "InDetTrackParticlesAuxDyn.d0", "min": -10.0, "max": 10.0}
+        - {"branch": "InDetTrackParticlesAuxDyn.z0", "min": -200.0, "max": 200.0}
+        - {"branch": "derived.InDetTrackParticlesAuxDyn.pt", "min": 1.0}  # Minimum 1 GeV pt
+        - {"branch": "derived.InDetTrackParticlesAuxDyn.reducedChiSquared", "max": 5.0}
+      sort_by_branch: {"branch": "derived.InDetTrackParticlesAuxDyn.pt"}  # Sort by pt
+      min_length: 15  # Require sufficient tracks
+      max_length: 50  # Reasonable upper limit
+
+  label_features:
+    - []
+
+  # Leading jet pt as target (highest pt jet)
+  label_array_aggregators:
+    - - input_branches:
+          - "AnalysisJetsAuxDyn.pt"
+        filter_branches:
+          - {"branch": "AnalysisJetsAuxDyn.pt", "min": 25.0}  # Minimum 25 GeV leading jet
+        sort_by_branch: {"branch": "AnalysisJetsAuxDyn.pt"}  # Sort by pt descending
+        min_length: 1
+        max_length: 1  # Only leading jet
+
+# Model Configuration - Robust architecture for leading jet pt regression
+models:
+  standalone_dnn:
+    model_type: "standalone_dnn_regressor"
+    architecture:
+      hidden_layers: [128, 128, 64, 48, 32]  # Deep architecture
+      activation: "relu"
+      output_activation: "linear"
+      name: "leading_jet_pt_regressor"
+    hyperparameters:
+      dropout_rate: 0.2
+      l2_regularization: 0.0001  # L2 regularization for stability
+      batch_normalization: true  # Batch normalization for training stability
+
+# Training Configuration - Comprehensive training setup
+training:
+  standalone_dnn:
+    batch_size: 128
+    learning_rate: 0.001
+    epochs: 100  # Extended training for main model
+    early_stopping:
+      patience: 15
+      min_delta: 0.0001
+    gradient_clip_norm: 1.0
+    lr_scheduler:
+      type: "reduce_on_plateau"
+      monitor: "val_loss"
+      factor: 0.5
+      patience: 8
+      min_lr: 1e-6
+      verbose: true
+    plot_training: true
+
+# Evaluation Configuration - Comprehensive data size study
+evaluation:
+  # Multiple data sizes for comprehensive analysis
+  regression_data_sizes: [1000, 10000, 50000, 100000, 500000]
+  fixed_epochs: 50  # Fixed epochs for fair comparison
+  
+  # K-fold cross-validation settings
+  use_k_fold_cv: true  # Enable k-fold CV for stable statistics
+  k_fold: 3  # 3-fold cross-validation
+  
+  # Plot settings
+  create_detailed_plots: true
+  error_analysis_bins: 100
+  prediction_sample_size: 2000  # Samples for prediction plots
+  include_feature_importance: false
+
+# Pipeline Settings
+pipeline:
+  delete_catalogs: false  # Keep catalogs for debugging
+  experiments_output_dir: "_standalone_experiments"
+  processed_data_parent_dir: null
