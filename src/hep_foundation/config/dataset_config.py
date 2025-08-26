@@ -26,8 +26,8 @@ class DatasetConfig:
         """Validate dataset configuration parameters"""
         if not self.run_numbers:
             raise ValueError("run_numbers cannot be empty")
-        if self.catalog_limit < 1:
-            raise ValueError("catalog_limit must be positive")
+        if self.catalog_limit is not None and self.catalog_limit < 1:
+            raise ValueError("catalog_limit must be positive when specified")
         if self.event_limit is not None and self.event_limit < 1:
             raise ValueError("event_limit must be positive when specified")
         if self.signal_event_limit is not None and self.signal_event_limit < 1:
