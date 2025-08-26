@@ -6,7 +6,7 @@ including training history, prediction analysis, and error analysis visualizatio
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np

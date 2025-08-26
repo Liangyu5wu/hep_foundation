@@ -20,7 +20,7 @@ import yaml
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "src"))
 
 from hep_foundation.config.config_loader import PipelineConfigLoader  # noqa: E402
 from hep_foundation.config.logging_config import get_logger  # noqa: E402
