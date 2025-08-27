@@ -653,7 +653,7 @@ class StandalonePlotManager:
             cols = min(3, n_sizes)
             rows = (n_sizes + cols - 1) // cols
             
-            fig, axes = plt.subplots(rows, cols, figsize=get_figure_size("large", ratio=0.7))
+            fig, axes = plt.subplots(rows, cols, figsize=get_figure_size("large", ratio=1.0))
             if n_sizes == 1:
                 axes = [axes]
             elif rows == 1 and cols > 1:
@@ -899,7 +899,7 @@ class StandalonePlotManager:
             n_rows = (n_sizes + n_cols - 1) // n_cols
 
             fig, axes = plt.subplots(
-                n_rows, n_cols, figsize=get_figure_size("double", ratio=0.7)
+                n_rows, n_cols, figsize=get_figure_size("double", ratio=1.0)
             )
             if n_rows == 1 and n_cols == 1:
                 axes = [axes]
