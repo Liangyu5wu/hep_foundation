@@ -6,7 +6,9 @@
       "Bash(git push:*)",
       "Bash(git commit:*)",
       "Bash(python:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(source:*)",
+      "Bash(uv run:*)"
     ],
     "deny": [],
     "ask": []

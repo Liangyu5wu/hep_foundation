@@ -7,13 +7,13 @@ description: "Comprehensive standalone regression for leading jet pt prediction 
 version: "1.0"
 created_by: "Liangyu"
 
-# Dataset Configuration - Latest 5 run numbers with all catalogs
+# Dataset Configuration - Latest 4 run numbers with all catalogs
 dataset:
-  run_numbers: !python get_run_numbers()[-5:]  # Latest 5 ATLAS run numbers
-  signal_keys: ["zprime_tt", "wprime_taunu", "DMA", "leptoquark", "dm_4top_scalar"]  # All signals
+  run_numbers: !python get_run_numbers()[-4:]  # Latest 4 ATLAS run numbers
+  signal_keys: ["zprime_tt"]  # All signals
   catalog_limit: null  # Use ALL available catalogs for comprehensive training
   event_limit: null  # No limit on events per catalog
-  signal_event_limit: null  # No limit on signal events
+  signal_event_limit: 1000  # No limit on signal events
   validation_fraction: 0.15
   test_fraction: 0.15
   shuffle_buffer: 100000  # Large shuffle buffer for better mixing
@@ -54,7 +54,7 @@ task:
     - - input_branches:
           - "AnalysisJetsAuxDyn.pt"
         filter_branches:
-          - {"branch": "AnalysisJetsAuxDyn.pt", "min": 25.0}  # Minimum 25 GeV leading jet
+          - {"branch": "AnalysisJetsAuxDyn.pt", "min": 20.0}  # Minimum 20 GeV leading jet
         sort_by_branch: {"branch": "AnalysisJetsAuxDyn.pt"}  # Sort by pt descending
         min_length: 1
         max_length: 1  # Only leading jet
@@ -95,7 +95,7 @@ training:
 # Evaluation Configuration - Comprehensive data size study
 evaluation:
   # Multiple data sizes for comprehensive analysis
-  regression_data_sizes: [1000, 10000, 50000, 100000, 500000]
+  regression_data_sizes: [1000, 10000, 50000, 100000]
   fixed_epochs: 50  # Fixed epochs for fair comparison
   
   # K-fold cross-validation settings

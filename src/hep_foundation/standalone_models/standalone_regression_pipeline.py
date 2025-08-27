@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import h5py
 import numpy as np
 import tensorflow as tf
 
@@ -54,6 +55,7 @@ class StandaloneRegressionPipeline:
         self.processed_datasets_dir = processed_datasets_dir
         self.experiments_output_dir = experiments_output_dir
         self.plot_manager = StandalonePlotManager()
+        self.norm_params = None  # Store normalization parameters
 
         # Create output directory
         self.experiments_output_dir.mkdir(parents=True, exist_ok=True)
@@ -87,6 +89,119 @@ class StandaloneRegressionPipeline:
             return obj.numpy().tolist()
         else:
             return obj
+
+    def _load_normalization_params(self, dataset_manager: DatasetManager) -> dict:
+        """Load normalization parameters from dataset."""
+        try:
+            dataset_path = dataset_manager.get_current_dataset_path()
+            with h5py.File(dataset_path, "r") as f:
+                norm_params = json.loads(f.attrs["normalization_params"])
+                self.logger.info("Successfully loaded normalization parameters")
+                return norm_params
+        except Exception as e:
+            self.logger.warning(f"Failed to load normalization parameters: {e}")
+            return None
+
+    def _denormalize_labels(
+        self,
+        normalized_labels: np.ndarray,
+        norm_params: dict,
+        label_config_index: int = 0
+    ) -> np.ndarray:
+        """
+        Denormalize labels using stored normalization parameters.
+        
+        Args:
+            normalized_labels: Array of normalized label values
+            norm_params: Normalization parameters dictionary
+            label_config_index: Index of the label configuration to use
+            
+        Returns:
+            Denormalized labels array
+        """
+        if norm_params is None:
+            self.logger.warning("No normalization parameters available, returning original labels")
+            return normalized_labels
+            
+        try:
+            label_norm_params = norm_params["labels"][label_config_index]
+            denormalized = normalized_labels.copy()
+            
+            # Handle aggregated features (arrays)
+            if "aggregated" in label_norm_params:
+                for agg_name, params in label_norm_params["aggregated"].items():
+                    means = np.array(params["means"])
+                    stds = np.array(params["stds"])
+                    
+                    # Apply denormalization: denormalized = normalized * std + mean
+                    denormalized = denormalized * stds + means
+                    break  # Assuming single aggregator for labels
+                    
+            # Handle scalar features
+            elif "scalar" in label_norm_params:
+                for scalar_name, params in label_norm_params["scalar"].items():
+                    mean = params["mean"] 
+                    std = params["std"]
+                    # Apply denormalization for scalar features
+                    denormalized = denormalized * std + mean
+                    break  # Assuming single scalar feature for labels
+                    
+            return denormalized
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to denormalize labels: {e}, using normalized values")
+            return normalized_labels
+
+    def _average_training_histories(self, fold_histories: list[dict]) -> dict:
+        """
+        Average training histories from multiple k-fold runs.
+        
+        Args:
+            fold_histories: List of training history dictionaries from different folds
+            
+        Returns:
+            Averaged training history dictionary
+        """
+        if not fold_histories:
+            return {}
+            
+        # Find common metrics across all folds
+        common_metrics = set(fold_histories[0].keys())
+        for history in fold_histories[1:]:
+            common_metrics = common_metrics.intersection(set(history.keys()))
+        
+        averaged_history = {}
+        
+        for metric in common_metrics:
+            # Get all metric values for this metric across folds
+            metric_values = []
+            min_length = float('inf')
+            
+            # Find minimum length across all folds for this metric
+            for history in fold_histories:
+                if metric in history and history[metric]:
+                    min_length = min(min_length, len(history[metric]))
+            
+            if min_length == float('inf') or min_length == 0:
+                continue
+                
+            # Collect values for averaging (truncate to min_length)
+            for history in fold_histories:
+                if metric in history and history[metric]:
+                    metric_values.append(history[metric][:min_length])
+            
+            if metric_values:
+                # Calculate mean across folds for each epoch
+                averaged_values = []
+                for epoch_idx in range(min_length):
+                    epoch_values = [fold_values[epoch_idx] for fold_values in metric_values if epoch_idx < len(fold_values)]
+                    if epoch_values:
+                        averaged_values.append(np.mean(epoch_values))
+                
+                if averaged_values:
+                    averaged_history[metric] = averaged_values
+        
+        return averaged_history
 
     def run_complete_pipeline(
         self,
@@ -132,6 +247,9 @@ class StandaloneRegressionPipeline:
             train_dataset, val_dataset, test_dataset = self._load_datasets(
                 dataset_manager, dataset_config, task_config, delete_catalogs
             )
+
+            # Load normalization parameters for denormalization
+            self.norm_params = self._load_normalization_params(dataset_manager)
 
             # Step 2: Create and configure model
             model = self._create_model(model_config_dict, train_dataset)
@@ -499,18 +617,40 @@ class StandaloneRegressionPipeline:
 
             true_labels = np.concatenate(true_labels, axis=0)
 
-            # Prepare results
+            # Denormalize predictions and labels for analysis
+            if self.norm_params is not None:
+                self.logger.info("Denormalizing predictions and labels for main model analysis...")
+                try:
+                    predictions_denorm = self._denormalize_labels(predictions, self.norm_params)
+                    true_labels_denorm = self._denormalize_labels(true_labels, self.norm_params)
+                    self.logger.info("Successfully denormalized main model predictions and labels")
+                except Exception as e:
+                    self.logger.warning(f"Failed to denormalize main model data: {e}, using normalized values")
+                    predictions_denorm = predictions
+                    true_labels_denorm = true_labels
+            else:
+                predictions_denorm = predictions
+                true_labels_denorm = true_labels
+
+            # Prepare results - ensure test_metrics has consistent format
+            test_metrics = test_results.copy()
+            test_metrics.update({
+                "test_loss": test_results.get("loss", 0),
+                "test_mse": test_results.get("mse", 0),
+            })
+            
             results = {
                 "model_type": "main_model",
                 "data_size": total_train_events,
-                "test_metrics": test_results,
+                "test_metrics": test_metrics,
+                "final_training_metrics": test_results,  # Keep original for compatibility
                 "training_history": trainer.get_training_history(),
                 "total_parameters": main_model.model.count_params(),
             }
 
             predictions_dict = {
-                "predictions": predictions,
-                "targets": true_labels,
+                "predictions": predictions_denorm,  # Use denormalized values for plotting
+                "targets": true_labels_denorm,     # Use denormalized values for plotting
             }
 
             self.logger.info("Main model training completed successfully")
@@ -681,16 +821,36 @@ class StandaloneRegressionPipeline:
 
             true_labels = np.concatenate(true_labels, axis=0)
 
-            # Prepare results
+            # Denormalize predictions and labels for analysis
+            if self.norm_params is not None:
+                try:
+                    predictions_denorm = self._denormalize_labels(predictions, self.norm_params)
+                    true_labels_denorm = self._denormalize_labels(true_labels, self.norm_params)
+                except Exception as e:
+                    self.logger.warning(f"Failed to denormalize data size {data_size}: {e}, using normalized values")
+                    predictions_denorm = predictions
+                    true_labels_denorm = true_labels
+            else:
+                predictions_denorm = predictions
+                true_labels_denorm = true_labels
+
+            # Prepare results - ensure test_metrics has consistent format
+            test_metrics = test_results.copy()
+            test_metrics.update({
+                "test_loss": test_results.get("loss", 0),
+                "test_mse": test_results.get("mse", 0),
+            })
+            
             results = {
                 "data_size": data_size,
-                "test_metrics": test_results,
+                "test_metrics": test_metrics,
+                "final_training_metrics": test_results,  # Keep original for compatibility
                 "training_history": trainer.get_training_history(),
             }
 
             predictions_dict = {
-                "predictions": predictions,
-                "targets": true_labels,
+                "predictions": predictions_denorm,  # Use denormalized values for plotting
+                "targets": true_labels_denorm,     # Use denormalized values for plotting
             }
 
             return True, results, predictions_dict
@@ -830,6 +990,8 @@ class StandaloneRegressionPipeline:
                 fold_test_results = trainer.evaluate(test_dataset)
                 fold_predictions = trainer.predict(test_dataset)
                 
+                # Store training history for averaging
+                fold_test_results['training_history'] = trainer.get_training_history()
                 fold_results.append(fold_test_results)
                 fold_predictions_list.append(fold_predictions)
                 
@@ -866,31 +1028,48 @@ class StandaloneRegressionPipeline:
             # Use the best fold's predictions (lowest test loss)
             best_fold_idx = np.argmin([result.get('test_loss', result.get('test_mse', float('inf'))) for result in fold_results])
             best_predictions = fold_predictions_list[best_fold_idx]
+
+            # Denormalize predictions and labels for analysis
+            if self.norm_params is not None:
+                try:
+                    best_predictions_denorm = self._denormalize_labels(best_predictions, self.norm_params)
+                    true_labels_denorm = self._denormalize_labels(true_labels, self.norm_params)
+                except Exception as e:
+                    self.logger.warning(f"Failed to denormalize k-fold data size {data_size}: {e}, using normalized values")
+                    best_predictions_denorm = best_predictions
+                    true_labels_denorm = true_labels
+            else:
+                best_predictions_denorm = best_predictions
+                true_labels_denorm = true_labels
             
             # Prepare results using k-fold averages
             results = {
                 "data_size": data_size,
                 "test_metrics": {
-                    "test_loss": kfold_stats['test_loss_mean'],
-                    "test_mse": kfold_stats.get('test_mse_mean', kfold_stats['test_loss_mean']),
+                    "loss": kfold_stats.get('loss_mean', kfold_stats.get('test_loss_mean', 0)),
+                    "test_loss": kfold_stats.get('loss_mean', kfold_stats.get('test_loss_mean', 0)),
+                    "mse": kfold_stats.get('mse_mean', kfold_stats.get('test_mse_mean', 0)),
+                    "test_mse": kfold_stats.get('mse_mean', kfold_stats.get('test_mse_mean', 0)),
                     "mae": kfold_stats.get('mae_mean', 0),
                     "r2": kfold_stats.get('r2_mean', 0),
+                    "correlation": kfold_stats.get('correlation_mean', 0),
                 },
                 "kfold_statistics": kfold_stats,
                 "n_successful_folds": len(fold_results),
             }
             
             predictions_dict = {
-                "predictions": best_predictions,
-                "targets": true_labels,
+                "predictions": best_predictions_denorm,  # Use denormalized values for plotting
+                "targets": true_labels_denorm,          # Use denormalized values for plotting
             }
             
-            # Convert kfold_stats for returning
+            # Convert kfold_stats for returning  
             kfold_return_stats = {
-                'test_loss': [r.get('test_loss', r.get('test_mse', 0)) for r in fold_results],
+                'test_loss': [r.get('loss', r.get('test_loss', 0)) for r in fold_results],
                 'mae': [r.get('mae', 0) for r in fold_results],
-                'mse': [r.get('test_mse', r.get('test_loss', 0)) for r in fold_results],
+                'mse': [r.get('mse', r.get('test_mse', 0)) for r in fold_results],
                 'r2': [r.get('r2', 0) for r in fold_results],
+                'correlation': [r.get('correlation', 0) for r in fold_results],
             }
             
             return True, results, predictions_dict, kfold_return_stats
@@ -956,10 +1135,27 @@ class StandaloneRegressionPipeline:
                     f"Training History ({total_train_events} events)",
                 )
 
-            # 3. Training history summary for different data sizes
+            # 3. Training history summary for different data sizes - use k-fold averaged histories when available
             if all_results and len(all_results) > 1:
                 histories_by_size = {}
                 for data_size, results in all_results.items():
+                    # Check if we have k-fold statistics with training history info
+                    if "kfold_statistics" in results and all_kfold_results and data_size in all_kfold_results:
+                        kfold_data = all_kfold_results[data_size]
+                        if isinstance(kfold_data, list) and len(kfold_data) > 0:
+                            # Average training histories from multiple folds
+                            fold_histories = []
+                            for fold_result in kfold_data:
+                                if isinstance(fold_result, dict) and 'training_history' in fold_result:
+                                    fold_histories.append(fold_result['training_history'])
+                            
+                            if fold_histories:
+                                # Average the training histories
+                                avg_history = self._average_training_histories(fold_histories)
+                                histories_by_size[data_size] = avg_history
+                                continue
+                    
+                    # Fall back to single training history if no k-fold data
                     if "training_history" in results:
                         histories_by_size[data_size] = results["training_history"]
                 
@@ -967,7 +1163,7 @@ class StandaloneRegressionPipeline:
                     self.plot_manager.create_training_history_summary(
                         histories_by_size,
                         plots_dir / "training_history_summary.png",
-                        "Training History Summary Across Data Sizes",
+                        "Training History Summary (K-Fold Averaged where available)",
                     )
 
             # 4. Metrics vs data size with k-fold error bars
@@ -1019,25 +1215,6 @@ class StandaloneRegressionPipeline:
 
             # 6. Additional comprehensive plots for main model
             if main_predictions and "predictions" in main_predictions:
-                # 2D histogram for main model
-                self.plot_manager.create_prediction_vs_true_2d_histogram(
-                    main_predictions["predictions"],
-                    main_predictions["targets"],
-                    plots_dir / "main_model_2d_histogram.png",
-                    f"Main Model 2D Histogram ({total_train_events} events)",
-                    n_bins=50,
-                    sample_size=5000,
-                )
-
-                # Comprehensive error analysis for main model
-                self.plot_manager.create_error_analysis_plot(
-                    main_predictions["predictions"],
-                    main_predictions["targets"],
-                    plots_dir / "main_model_error_analysis.png",
-                    f"Main Model Error Analysis ({total_train_events} events)",
-                    n_bins=evaluation_config.error_analysis_bins,
-                )
-
                 # Relative error histogram for main model
                 self.plot_manager.create_relative_error_histogram(
                     main_predictions["predictions"],
