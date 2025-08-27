@@ -298,12 +298,12 @@ class StandalonePlotManager:
                 pred_sample = predictions
                 target_sample = targets
 
-            # Create 2x2 subplot
-            fig, axes = plt.subplots(2, 2, figsize=get_figure_size("double", ratio=1.0))
-            colors = get_color_cycle("high_contrast", 3)
+            # Create 1x2 subplot (simplified)
+            fig, axes = plt.subplots(1, 2, figsize=get_figure_size("double", ratio=0.5))
+            colors = get_color_cycle("high_contrast", 2)
 
             # Plot 1: Predictions vs Targets scatter
-            axes[0, 0].scatter(
+            axes[0].scatter(
                 target_sample,
                 pred_sample,
                 alpha=0.6,
@@ -313,7 +313,7 @@ class StandalonePlotManager:
             # Perfect prediction line
             min_val = min(np.min(target_sample), np.min(pred_sample))
             max_val = max(np.max(target_sample), np.max(pred_sample))
-            axes[0, 0].plot(
+            axes[0].plot(
                 [min_val, max_val],
                 [min_val, max_val],
                 "r--",
@@ -321,81 +321,55 @@ class StandalonePlotManager:
                 label="Perfect Prediction",
             )
 
-            axes[0, 0].set_xlabel("True Values", fontsize=FONT_SIZES["small"])
-            axes[0, 0].set_ylabel("Predictions", fontsize=FONT_SIZES["small"])
-            axes[0, 0].set_title(
+            axes[0].set_xlabel("True Values", fontsize=FONT_SIZES["small"])
+            axes[0].set_ylabel("Predictions", fontsize=FONT_SIZES["small"])
+            axes[0].set_title(
                 "Predictions vs True Values", fontsize=FONT_SIZES["normal"]
             )
-            axes[0, 0].legend(fontsize=FONT_SIZES["tiny"])
-            axes[0, 0].grid(True, alpha=0.3)
+            axes[0].legend(fontsize=FONT_SIZES["tiny"])
+            axes[0].grid(True, alpha=0.3)
 
             # Calculate R²
             r2 = stats.pearsonr(target_sample.flatten(), pred_sample.flatten())[0] ** 2
-            axes[0, 0].text(
+            axes[0].text(
                 0.05,
                 0.95,
                 f"R² = {r2:.3f}",
-                transform=axes[0, 0].transAxes,
+                transform=axes[0].transAxes,
                 fontsize=FONT_SIZES["small"],
                 verticalalignment="top",
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
             )
 
-            # Plot 2: Residuals histogram
+            # Plot 2: Residuals histogram only
             residuals = pred_sample - target_sample
-            axes[0, 1].hist(
+            axes[1].hist(
                 residuals.flatten(), bins=50, alpha=0.7, color=colors[1], density=True
             )
-            axes[0, 1].axvline(
+            axes[1].axvline(
                 0, color="r", linestyle="--", linewidth=LINE_WIDTHS["thick"]
             )
-            axes[0, 1].set_xlabel(
+            axes[1].set_xlabel(
                 "Residuals (Pred - True)", fontsize=FONT_SIZES["small"]
             )
-            axes[0, 1].set_ylabel("Density", fontsize=FONT_SIZES["small"])
-            axes[0, 1].set_title(
+            axes[1].set_ylabel("Density", fontsize=FONT_SIZES["small"])
+            axes[1].set_title(
                 "Residuals Distribution", fontsize=FONT_SIZES["normal"]
             )
-            axes[0, 1].grid(True, alpha=0.3)
+            axes[1].grid(True, alpha=0.3)
 
             # Add residual statistics
             mean_residual = np.mean(residuals)
             std_residual = np.std(residuals)
-            axes[0, 1].text(
+            axes[1].text(
                 0.05,
                 0.95,
                 f"μ = {mean_residual:.3e}\nσ = {std_residual:.3e}",
-                transform=axes[0, 1].transAxes,
+                transform=axes[1].transAxes,
                 fontsize=FONT_SIZES["tiny"],
                 verticalalignment="top",
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
             )
-
-            # Plot 3: Residuals vs Predictions
-            axes[1, 0].scatter(
-                pred_sample.flatten(),
-                residuals.flatten(),
-                alpha=0.6,
-                s=MARKER_SIZES["small"],
-                color=colors[2],
-            )
-            axes[1, 0].axhline(
-                0, color="r", linestyle="--", linewidth=LINE_WIDTHS["thick"]
-            )
-            axes[1, 0].set_xlabel("Predictions", fontsize=FONT_SIZES["small"])
-            axes[1, 0].set_ylabel("Residuals", fontsize=FONT_SIZES["small"])
-            axes[1, 0].set_title(
-                "Residuals vs Predictions", fontsize=FONT_SIZES["normal"]
-            )
-            axes[1, 0].grid(True, alpha=0.3)
-
-            # Plot 4: Q-Q plot for residual normality
-
-            stats.probplot(residuals.flatten(), dist="norm", plot=axes[1, 1])
-            axes[1, 1].set_title(
-                "Q-Q Plot (Residual Normality)", fontsize=FONT_SIZES["normal"]
-            )
-            axes[1, 1].grid(True, alpha=0.3)
 
             # Overall title
             fig.suptitle(f"{title_prefix}", fontsize=FONT_SIZES["large"])
@@ -410,6 +384,260 @@ class StandalonePlotManager:
 
         except Exception as e:
             self.logger.error(f"Failed to create prediction quality plot: {e}")
+
+    def create_training_history_summary(
+        self,
+        histories_by_size: dict[int, dict[str, list[float]]],
+        output_path: Path,
+        title_prefix: str = "Training History Summary",
+    ) -> None:
+        """
+        Create training history summary plot for different data sizes.
+
+        Args:
+            histories_by_size: Dictionary mapping data_size -> training_history
+            output_path: Path to save the plot
+            title_prefix: Prefix for the plot title
+        """
+        try:
+            if not histories_by_size:
+                self.logger.warning("No training histories available for summary")
+                return
+
+            # Create subplots
+            fig, axes = plt.subplots(2, 2, figsize=get_figure_size("double", ratio=1.0))
+            colors = get_color_cycle("high_contrast", len(histories_by_size))
+            
+            # Extract metrics
+            metrics_to_plot = ['loss', 'val_loss', 'mae', 'val_mae']
+            metric_titles = ['Training Loss', 'Validation Loss', 'Training MAE', 'Validation MAE']
+            
+            for idx, (metric, title) in enumerate(zip(metrics_to_plot, metric_titles)):
+                row, col = divmod(idx, 2)
+                ax = axes[row, col]
+                
+                for color_idx, (data_size, history) in enumerate(sorted(histories_by_size.items())):
+                    if metric in history and history[metric]:
+                        epochs = range(1, len(history[metric]) + 1)
+                        ax.plot(epochs, history[metric], 
+                               color=colors[color_idx % len(colors)], 
+                               linewidth=LINE_WIDTHS["normal"],
+                               label=f"{data_size} events",
+                               alpha=0.8)
+                
+                ax.set_xlabel('Epoch', fontsize=FONT_SIZES["small"])
+                ax.set_ylabel(title, fontsize=FONT_SIZES["small"])
+                ax.set_title(title, fontsize=FONT_SIZES["normal"])
+                ax.grid(True, alpha=0.3)
+                if idx == 0:  # Add legend only to first subplot
+                    ax.legend(fontsize=FONT_SIZES["tiny"], loc='upper right')
+                
+            fig.suptitle(f"{title_prefix}", fontsize=FONT_SIZES["large"])
+            plt.tight_layout()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+
+            self.logger.info(f"Training history summary saved to: {output_path}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to create training history summary: {e}")
+
+    def create_metrics_vs_datasize_plot(
+        self,
+        data_size_metrics: dict[int, dict[str, float]],
+        k_fold_stats: Optional[dict[int, dict[str, list[float]]]] = None,
+        output_path: Path = None,
+        title_prefix: str = "Metrics vs Data Size",
+    ) -> None:
+        """
+        Create evaluation metrics vs data size plot with k-fold error bars.
+
+        Args:
+            data_size_metrics: Dictionary mapping data_size -> metrics
+            k_fold_stats: Optional k-fold statistics for error bars
+            output_path: Path to save the plot
+            title_prefix: Prefix for the plot title
+        """
+        try:
+            if not data_size_metrics:
+                self.logger.warning("No data size metrics available")
+                return
+
+            data_sizes = sorted(data_size_metrics.keys())
+            
+            # Create 2x2 subplots
+            fig, axes = plt.subplots(2, 2, figsize=get_figure_size("double", ratio=1.0))
+            colors = get_color_cycle("high_contrast", 4)
+            
+            # Extract metrics with error bars
+            metrics_info = [
+                ('test_loss', 'Test Loss (MSE)', 'test_loss'),
+                ('mae', 'Mean Absolute Error', 'mae'),
+                ('mse', 'Mean Squared Error', 'mse'),
+                ('r2', 'R² Score', 'r2')
+            ]
+            
+            for idx, (metric_key, metric_title, kfold_key) in enumerate(metrics_info):
+                row, col = divmod(idx, 2)
+                ax = axes[row, col]
+                
+                # Extract values and error bars
+                values = []
+                errors = []
+                valid_sizes = []
+                
+                for size in data_sizes:
+                    if size in data_size_metrics:
+                        metric_val = data_size_metrics[size].get(metric_key, 
+                                   data_size_metrics[size].get('test_mse' if metric_key == 'test_loss' else metric_key, 0))
+                        if isinstance(metric_val, (int, float)):
+                            values.append(metric_val)
+                            valid_sizes.append(size)
+                            
+                            # Add error bar if k-fold data available
+                            if k_fold_stats and size in k_fold_stats:
+                                kfold_values = k_fold_stats[size].get(kfold_key, [])
+                                if kfold_values and len(kfold_values) > 1:
+                                    errors.append(np.std(kfold_values))
+                                else:
+                                    errors.append(0)
+                            else:
+                                errors.append(0)
+                
+                if valid_sizes and values:
+                    ax.errorbar(valid_sizes, values, yerr=errors,
+                               color=colors[idx], marker='o', 
+                               linewidth=LINE_WIDTHS["thick"],
+                               markersize=MARKER_SIZES["normal"],
+                               capsize=5, capthick=2)
+                    
+                    ax.set_xlabel('Training Data Size', fontsize=FONT_SIZES["small"])
+                    ax.set_ylabel(metric_title, fontsize=FONT_SIZES["small"])
+                    ax.set_title(metric_title, fontsize=FONT_SIZES["normal"])
+                    ax.set_xscale('log')
+                    if metric_key in ['test_loss', 'mae', 'mse'] and all(v > 0 for v in values):
+                        ax.set_yscale('log')
+                    ax.grid(True, alpha=0.3)
+                else:
+                    ax.text(0.5, 0.5, f'No valid {metric_title.lower()} data',
+                           ha='center', va='center', transform=ax.transAxes)
+
+            fig.suptitle(f"{title_prefix}", fontsize=FONT_SIZES["large"])
+            plt.tight_layout()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+
+            self.logger.info(f"Metrics vs data size plot saved to: {output_path}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to create metrics vs data size plot: {e}")
+
+    def create_pred_vs_true_subplots(
+        self,
+        predictions_by_size: dict[int, dict[str, np.ndarray]],
+        output_path: Path,
+        title_prefix: str = "Predictions vs True Values",
+        sample_size: int = 1000,
+    ) -> None:
+        """
+        Create pred vs true subplots for different data sizes.
+
+        Args:
+            predictions_by_size: Dictionary mapping data_size -> {predictions, targets}
+            output_path: Path to save the plot
+            title_prefix: Prefix for the plot title
+            sample_size: Number of samples to plot per subplot
+        """
+        try:
+            if not predictions_by_size:
+                self.logger.warning("No predictions available for subplots")
+                return
+
+            # Filter valid predictions
+            valid_predictions = {}
+            for data_size, pred_dict in predictions_by_size.items():
+                if ("predictions" in pred_dict and "targets" in pred_dict and
+                    len(pred_dict["predictions"]) > 0 and len(pred_dict["targets"]) > 0):
+                    valid_predictions[data_size] = pred_dict
+            
+            if not valid_predictions:
+                self.logger.warning("No valid predictions for subplots")
+                return
+            
+            # Create subplots grid
+            n_sizes = len(valid_predictions)
+            cols = min(3, n_sizes)
+            rows = (n_sizes + cols - 1) // cols
+            
+            fig, axes = plt.subplots(rows, cols, figsize=get_figure_size("large", ratio=0.8))
+            if n_sizes == 1:
+                axes = [axes]
+            elif rows == 1 and cols > 1:
+                axes = axes.flatten()
+            elif rows > 1 and cols == 1:
+                axes = axes.flatten()
+            elif rows > 1 and cols > 1:
+                axes = axes.flatten()
+            
+            colors = get_color_cycle("high_contrast", n_sizes)
+            
+            for idx, (data_size, pred_dict) in enumerate(sorted(valid_predictions.items())):
+                if idx >= len(axes):
+                    break
+                    
+                ax = axes[idx]
+                
+                predictions = pred_dict["predictions"].flatten()
+                targets = pred_dict["targets"].flatten()
+                
+                # Sample data if too large
+                if len(predictions) > sample_size:
+                    indices = np.random.choice(len(predictions), sample_size, replace=False)
+                    predictions = predictions[indices]
+                    targets = targets[indices]
+                
+                # Create scatter plot
+                ax.scatter(targets, predictions, alpha=0.6, s=20, 
+                          color=colors[idx % len(colors)])
+                
+                # Add perfect prediction line
+                min_val = min(np.min(targets), np.min(predictions))
+                max_val = max(np.max(targets), np.max(predictions))
+                ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
+                       alpha=0.8, linewidth=LINE_WIDTHS["normal"])
+                
+                # Calculate and display R²
+                try:
+                    ss_res = np.sum((targets - predictions) ** 2)
+                    ss_tot = np.sum((targets - np.mean(targets)) ** 2)
+                    r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+                    ax.text(0.05, 0.95, f'R² = {r2:.3f}', transform=ax.transAxes, 
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                           fontsize=FONT_SIZES["small"])
+                except:
+                    pass
+                
+                ax.set_title(f'{data_size} events', fontsize=FONT_SIZES["normal"])
+                ax.set_xlabel('True Values', fontsize=FONT_SIZES["small"])
+                ax.set_ylabel('Predictions', fontsize=FONT_SIZES["small"])
+                ax.grid(True, alpha=0.3)
+            
+            # Hide empty subplots
+            for idx in range(n_sizes, len(axes)):
+                axes[idx].set_visible(False)
+            
+            fig.suptitle(f"{title_prefix}", fontsize=FONT_SIZES["large"])
+            plt.tight_layout()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+            
+            self.logger.info(f"Pred vs true subplots saved to: {output_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create pred vs true subplots: {e}")
 
     def create_error_analysis_plot(
         self,

@@ -933,12 +933,12 @@ class StandaloneRegressionPipeline:
         evaluation_config: StandaloneEvaluationConfig,
         total_train_events: int,
     ) -> None:
-        """Create essential plots for standalone regression analysis."""
+        """Create comprehensive plots for standalone regression analysis."""
         try:
             plots_dir = eval_dir / "plots"
             plots_dir.mkdir(parents=True, exist_ok=True)
 
-            # 1. Main model analysis (combined prediction and error analysis)
+            # 1. Main model analysis (simplified: pred vs true + residuals histogram)
             if main_predictions and "predictions" in main_predictions:
                 self.plot_manager.create_prediction_quality_plot(
                     main_predictions["predictions"],
@@ -956,133 +956,70 @@ class StandaloneRegressionPipeline:
                     f"Training History ({total_train_events} events)",
                 )
 
-            # 3. Data efficiency comparison (only if we have multiple data sizes)
+            # 3. Training history summary for different data sizes
             if all_results and len(all_results) > 1:
-                # Prepare efficiency data with validation
-                efficiency_data = {}
-                valid_results_count = 0
+                histories_by_size = {}
+                for data_size, results in all_results.items():
+                    if "training_history" in results:
+                        histories_by_size[data_size] = results["training_history"]
                 
+                if histories_by_size:
+                    self.plot_manager.create_training_history_summary(
+                        histories_by_size,
+                        plots_dir / "training_history_summary.png",
+                        "Training History Summary Across Data Sizes",
+                    )
+
+            # 4. Metrics vs data size with k-fold error bars
+            if all_results and len(all_results) > 1:
+                # Prepare metrics data
+                data_size_metrics = {}
                 for data_size, results in all_results.items():
                     test_metrics = results.get("test_metrics", {})
-                    if test_metrics and any(v > 0 for v in test_metrics.values() if isinstance(v, (int, float))):
-                        efficiency_data[str(data_size)] = test_metrics
-                        valid_results_count += 1
+                    if test_metrics:
+                        data_size_metrics[data_size] = test_metrics
                 
-                # Add main model if it has valid metrics
+                # Add main model
                 main_test_metrics = main_results.get("test_metrics", {})
-                if main_test_metrics and any(v > 0 for v in main_test_metrics.values() if isinstance(v, (int, float))):
-                    efficiency_data[str(total_train_events)] = main_test_metrics
-                    valid_results_count += 1
+                if main_test_metrics:
+                    data_size_metrics[total_train_events] = main_test_metrics
                 
-                # Only create efficiency plots if we have valid data
-                if valid_results_count >= 2:
-                    self.plot_manager.create_data_efficiency_plot(
-                        efficiency_data,
-                        plots_dir / "data_efficiency_analysis.png",
-                        "Data Size Efficiency Analysis",
+                # Load k-fold results if available
+                kfold_results_file = eval_dir / "k_fold_statistics.json"
+                k_fold_data = None
+                if kfold_results_file.exists():
+                    try:
+                        with open(kfold_results_file, 'r') as f:
+                            k_fold_data = json.load(f)
+                        # Convert string keys to int
+                        if k_fold_data:
+                            k_fold_data = {int(k): v for k, v in k_fold_data.items()}
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load k-fold results: {e}")
+                        k_fold_data = None
+                
+                if data_size_metrics:
+                    self.plot_manager.create_metrics_vs_datasize_plot(
+                        data_size_metrics,
+                        k_fold_data,
+                        plots_dir / "metrics_vs_datasize.png",
+                        "Evaluation Metrics vs Data Size",
                     )
-                else:
-                    self.logger.warning("Insufficient valid data for efficiency analysis plots")
 
-            # 4. Combined multi-size comparison (if detailed plots requested)
+            # 5. Pred vs true subplots for different data sizes
             if (evaluation_config.create_detailed_plots and all_predictions and 
                 len(all_predictions) > 0):
                 
-                # Create a single combined comparison plot instead of individual plots
-                self._create_combined_size_comparison(all_predictions, plots_dir)
+                self.plot_manager.create_pred_vs_true_subplots(
+                    all_predictions,
+                    plots_dir / "pred_vs_true_by_datasize.png",
+                    "Predictions vs True Values by Data Size",
+                    evaluation_config.prediction_sample_size,
+                )
 
         except Exception as e:
             self.logger.error(f"Failed to create plots: {e}")
             self.logger.exception("Detailed error:")
-
-    def _create_combined_size_comparison(
-        self,
-        all_predictions: dict[int, dict[str, np.ndarray]],
-        plots_dir: Path,
-    ) -> None:
-        """Create a combined comparison plot for different data sizes."""
-        try:
-            import matplotlib.pyplot as plt
-            from hep_foundation.standalone_models.standalone_plot_manager import (
-                get_figure_size, get_color_cycle, FONT_SIZES, LINE_WIDTHS, MARKER_SIZES
-            )
-            
-            # Filter valid predictions
-            valid_predictions = {}
-            for data_size, pred_dict in all_predictions.items():
-                if ("predictions" in pred_dict and "targets" in pred_dict and
-                    len(pred_dict["predictions"]) > 0 and len(pred_dict["targets"]) > 0):
-                    valid_predictions[data_size] = pred_dict
-            
-            if len(valid_predictions) == 0:
-                self.logger.warning("No valid predictions for combined size comparison")
-                return
-            
-            # Create figure with subplots
-            n_sizes = len(valid_predictions)
-            cols = min(3, n_sizes)
-            rows = (n_sizes + cols - 1) // cols
-            
-            fig, axes = plt.subplots(rows, cols, figsize=get_figure_size("large", ratio=0.8))
-            if n_sizes == 1:
-                axes = [axes]
-            elif rows == 1:
-                axes = axes.reshape(1, -1)
-            
-            colors = get_color_cycle("high_contrast", n_sizes)
-            
-            for idx, (data_size, pred_dict) in enumerate(sorted(valid_predictions.items())):
-                row, col = divmod(idx, cols)
-                ax = axes[row, col] if rows > 1 else axes[col]
-                
-                predictions = pred_dict["predictions"].flatten()
-                targets = pred_dict["targets"].flatten()
-                
-                # Sample data if too large
-                if len(predictions) > 2000:
-                    indices = np.random.choice(len(predictions), 2000, replace=False)
-                    predictions = predictions[indices]
-                    targets = targets[indices]
-                
-                # Create scatter plot
-                ax.scatter(targets, predictions, alpha=0.6, s=20, color=colors[idx % len(colors)])
-                
-                # Add perfect prediction line
-                min_val = min(np.min(targets), np.min(predictions))
-                max_val = max(np.max(targets), np.max(predictions))
-                ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=1)
-                
-                # Calculate R²
-                try:
-                    from sklearn.metrics import r2_score
-                    r2 = r2_score(targets, predictions)
-                    ax.text(0.05, 0.95, f'R² = {r2:.3f}', transform=ax.transAxes, 
-                           bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
-                           fontsize=FONT_SIZES["small"])
-                except:
-                    pass
-                
-                ax.set_title(f'{data_size} events', fontsize=FONT_SIZES["normal"])
-                ax.set_xlabel('True Values', fontsize=FONT_SIZES["small"])
-                ax.set_ylabel('Predictions', fontsize=FONT_SIZES["small"])
-                ax.grid(True, alpha=0.3)
-            
-            # Hide empty subplots
-            for idx in range(n_sizes, rows * cols):
-                row, col = divmod(idx, cols)
-                ax = axes[row, col] if rows > 1 else axes[col]
-                ax.set_visible(False)
-            
-            plt.suptitle('Prediction Quality Across Data Sizes', fontsize=FONT_SIZES["large"])
-            plt.tight_layout()
-            plt.savefig(plots_dir / "combined_size_comparison.png", dpi=300, bbox_inches="tight")
-            plt.close()
-            
-            self.logger.info(f"Combined size comparison plot saved with {n_sizes} data sizes")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to create combined size comparison: {e}")
-
 
     def _save_comprehensive_results(
         self,
