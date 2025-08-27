@@ -1,0 +1,97 @@
+# Ultra-fast test configuration for command line verification
+# Minimal data, minimal epochs, quick completion
+
+name: "quick_test"
+description: "Ultra-fast test for command line verification"
+version: "1.0"
+created_by: "Claude"
+
+# Dataset Configuration - Minimal setup
+dataset:
+  run_numbers: !python get_run_numbers()[-1:]  # Use only the latest 1 run
+  signal_keys: ["zprime_tt"]
+  catalog_limit: 2  # Use only 2 catalogs
+  event_limit: null
+  signal_event_limit: 200  # Limit signal events
+  validation_fraction: 0.25  # Larger validation fraction
+  test_fraction: 0.25
+  shuffle_buffer: 500
+  plot_distributions: false  # Disable distribution plots to save time
+  save_raw_samples: false   # Disable raw sample saving
+  include_labels: true
+  hdf5_compression: false   # Disable compression to save time
+
+# Task Configuration - Simplified features
+task:
+  event_filters: {}
+  input_features: []
+
+  input_array_aggregators:
+    - input_branches:
+        - "InDetTrackParticlesAuxDyn.d0"
+        - "derived.InDetTrackParticlesAuxDyn.pt"
+      filter_branches:
+        - {"branch": "derived.InDetTrackParticlesAuxDyn.pt", "min": 1.0}
+      sort_by_branch: {"branch": "derived.InDetTrackParticlesAuxDyn.pt"}
+      min_length: 3  # Fewer minimum length requirements
+      max_length: 10  # Shorter maximum length
+
+  label_features: []
+
+  label_array_aggregators:
+    - - input_branches:
+          - "AnalysisJetsAuxDyn.pt"
+        filter_branches:
+          - {"branch": "AnalysisJetsAuxDyn.pt", "min": 20.0}
+        sort_by_branch: {"branch": "AnalysisJetsAuxDyn.pt"}
+        min_length: 1
+        max_length: 1
+
+# Model Configuration - Minimal network
+models:
+  standalone_dnn:
+    model_type: "standalone_dnn_regressor"
+    architecture:
+      hidden_layers: [32, 16]  # Very small network
+      activation: "relu"
+      output_activation: "linear"
+      name: "quick_test_regressor"
+    hyperparameters:
+      dropout_rate: 0.0  # Disable dropout
+      l2_regularization: 0.0  # Disable regularization
+      batch_normalization: false  # Disable batch normalization
+
+# Training Configuration - Ultra-fast training
+training:
+  standalone_dnn:
+    batch_size: 32
+    learning_rate: 0.01  # Higher learning rate
+    epochs: 3  # Only 3 epochs
+    early_stopping:
+      patience: 10  # Disable early stopping (patience > epochs)
+      min_delta: 0.01
+    gradient_clip_norm: null  # Disable gradient clipping
+    lr_scheduler: null  # Disable learning rate scheduling
+    plot_training: false  # Disable training plots
+
+# Evaluation Configuration - Minimal testing
+evaluation:
+  # Test only 3 small data sizes
+  regression_data_sizes: [100, 300, 500]
+  fixed_epochs: 3  # Data efficiency study with only 3 epochs
+  
+  # Disable K-fold cross-validation to save time
+  use_k_fold_cv: false
+  k_fold: 2
+  
+  # Minimal plotting settings
+  create_detailed_plots: true
+  error_analysis_bins: 20  # Fewer bins
+  prediction_sample_size: 500  # Fewer samples
+  include_feature_importance: false
+
+# Pipeline Settings
+pipeline:
+  delete_catalogs: false
+  experiments_output_dir: "_standalone_experiments"
+  processed_data_parent_dir: null

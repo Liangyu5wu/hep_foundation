@@ -298,9 +298,10 @@ class StandalonePlotManager:
                 pred_sample = predictions
                 target_sample = targets
 
-            # Create 1x2 subplot (simplified)
-            fig, axes = plt.subplots(1, 2, figsize=get_figure_size("double", ratio=0.5))
-            colors = get_color_cycle("high_contrast", 2)
+            # Create 2x2 subplot for better proportions and more comprehensive analysis
+            fig, axes = plt.subplots(2, 2, figsize=get_figure_size("double", ratio=0.8))
+            axes = axes.flatten()
+            colors = get_color_cycle("high_contrast", 4)
 
             # Plot 1: Predictions vs Targets scatter
             axes[0].scatter(
@@ -341,7 +342,7 @@ class StandalonePlotManager:
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
             )
 
-            # Plot 2: Residuals histogram only
+            # Plot 2: Residuals histogram
             residuals = pred_sample - target_sample
             axes[1].hist(
                 residuals.flatten(), bins=50, alpha=0.7, color=colors[1], density=True
@@ -371,8 +372,62 @@ class StandalonePlotManager:
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
             )
 
+            # Plot 3: Relative errors (pred-true)/true * 100%
+            relative_errors = (pred_sample - target_sample) / (np.abs(target_sample) + 1e-8) * 100.0
+            relative_errors_clipped = np.clip(relative_errors.flatten(), -200, 200)  # Clip extreme outliers
+            axes[2].hist(
+                relative_errors_clipped, bins=50, alpha=0.7, color=colors[2], density=True
+            )
+            axes[2].axvline(
+                0, color="r", linestyle="--", linewidth=LINE_WIDTHS["thick"]
+            )
+            axes[2].set_xlabel(
+                "Relative Error (%)", fontsize=FONT_SIZES["small"]
+            )
+            axes[2].set_ylabel("Density", fontsize=FONT_SIZES["small"])
+            axes[2].set_title(
+                "Relative Error Distribution", fontsize=FONT_SIZES["normal"]
+            )
+            axes[2].grid(True, alpha=0.3)
+
+            # Add relative error statistics
+            mean_rel_error = np.mean(relative_errors_clipped)
+            std_rel_error = np.std(relative_errors_clipped)
+            axes[2].text(
+                0.05,
+                0.95,
+                f"μ = {mean_rel_error:.1f}%\nσ = {std_rel_error:.1f}%",
+                transform=axes[2].transAxes,
+                fontsize=FONT_SIZES["tiny"],
+                verticalalignment="top",
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+            )
+
+            # Plot 4: Error vs True Values scatter
+            abs_errors = np.abs(residuals.flatten())
+            axes[3].scatter(
+                target_sample.flatten(),
+                abs_errors,
+                alpha=0.5,
+                s=MARKER_SIZES["tiny"],
+                color=colors[3],
+            )
+            axes[3].set_xlabel("True Values", fontsize=FONT_SIZES["small"])
+            axes[3].set_ylabel("Absolute Error", fontsize=FONT_SIZES["small"])
+            axes[3].set_title("Error vs True Values", fontsize=FONT_SIZES["normal"])
+            axes[3].grid(True, alpha=0.3)
+
+            # Add MAE line
+            mae = np.mean(abs_errors)
+            axes[3].axhline(
+                mae, color="orange", linestyle="--", 
+                linewidth=LINE_WIDTHS["thick"], 
+                label=f"MAE = {mae:.3e}"
+            )
+            axes[3].legend(fontsize=FONT_SIZES["tiny"])
+
             # Overall title
-            fig.suptitle(f"{title_prefix}", fontsize=FONT_SIZES["large"])
+            fig.suptitle(f"{title_prefix}", fontsize=FONT_SIZES["large"], y=0.95)
 
             # Adjust layout and save
             plt.tight_layout()

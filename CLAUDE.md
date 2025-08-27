@@ -142,6 +142,9 @@ python standalone_utils/run_standalone_regression.py \
   --datasets-dir custom_datasets \
   --verbose
 
+# Quick testing (2-3 minutes)
+python standalone_utils/run_standalone_regression.py --config standalone_utils/quick_test.yaml
+
 # NERSC cluster submission
 sbatch standalone_utils/submit_leading_jet_pt_standalone.sh
 sbatch standalone_utils/submit_test_standalone.sh  # For testing
@@ -205,19 +208,21 @@ evaluation:
 
 **StandalonePlotManager** provides comprehensive plotting capabilities:
 
+- **Main Model Analysis** (`main_model_analysis.png`): 2x2 layout with predictions vs true values, residuals distribution, relative errors, and error scatter plot
 - **Training History**: Loss curves, learning rate schedules, early stopping visualization
-- **Prediction Analysis**: 
-  - 2D density histograms (predictions vs true values)
-  - Scatter plots with correlation statistics
-  - Residual analysis and error distributions
-- **Relative Error Analysis**: 
-  - Histograms of `(pred-true)/true * 100%`
-  - Full range and zoomed views
-  - Statistical summaries and percentiles
-- **Data Size Efficiency Studies**:
-  - Test loss vs training data size with k-fold error bars
-  - R² score progression across data sizes
-  - Comprehensive summary tables
+- **Data Efficiency Analysis**:
+  - `metrics_vs_datasize.png`: Test loss vs training data size with k-fold error bars
+  - `data_size_comparison_summary.png`: Comprehensive 2x2 summary with metrics and statistics table
+  - `training_history_summary.png`: Training curves comparison across different data sizes
+- **Prediction Quality Analysis**: 
+  - `pred_vs_true_by_datasize.png`: Multi-subplot comparison for different data sizes
+  - `multi_size_prediction_comparison.png`: Grid comparison of prediction quality
+  - `main_model_2d_histogram.png`: 2D density visualization
+- **Error Analysis**: 
+  - `main_model_error_analysis.png`: 4-panel comprehensive error analysis
+  - `main_model_relative_errors.png`: Detailed relative error histograms with `(pred-true)/true * 100%`
+
+**Complete Output**: Each standalone experiment now generates **10 comprehensive plots** instead of just 3, providing detailed insights into model performance, data efficiency, and error characteristics.
 
 ### NERSC Cluster Integration
 
@@ -245,6 +250,21 @@ tail -f logs/slurm-leading_jet_pt_standalone-*.out
 ```
 
 ### Best Practices for Standalone Training
+
+### Quick Testing Configuration
+
+For rapid prototyping and verification, use `standalone_utils/quick_test.yaml`:
+
+- **Ultra-fast execution**: 2-3 minutes total runtime
+- **Minimal resources**: 1 run, 2 catalogs, 200 signal events limit
+- **Small network**: [32, 16] hidden layers, no regularization
+- **Fast training**: 3 epochs main model, 3 epochs data efficiency study
+- **Data sizes**: [100, 300, 500] events for efficiency analysis
+- **All visualizations**: Still generates all 10 comprehensive plots
+
+**Usage**: `python standalone_utils/run_standalone_regression.py --config standalone_utils/quick_test.yaml`
+
+### Production Configuration Guidelines
 
 1. **Configuration Management**:
    - Use `!python get_run_numbers()[-5:]` for latest data

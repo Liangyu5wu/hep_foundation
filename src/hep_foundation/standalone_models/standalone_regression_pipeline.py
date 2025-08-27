@@ -1017,6 +1017,82 @@ class StandaloneRegressionPipeline:
                     evaluation_config.prediction_sample_size,
                 )
 
+            # 6. Additional comprehensive plots for main model
+            if main_predictions and "predictions" in main_predictions:
+                # 2D histogram for main model
+                self.plot_manager.create_prediction_vs_true_2d_histogram(
+                    main_predictions["predictions"],
+                    main_predictions["targets"],
+                    plots_dir / "main_model_2d_histogram.png",
+                    f"Main Model 2D Histogram ({total_train_events} events)",
+                    n_bins=50,
+                    sample_size=5000,
+                )
+
+                # Comprehensive error analysis for main model
+                self.plot_manager.create_error_analysis_plot(
+                    main_predictions["predictions"],
+                    main_predictions["targets"],
+                    plots_dir / "main_model_error_analysis.png",
+                    f"Main Model Error Analysis ({total_train_events} events)",
+                    n_bins=evaluation_config.error_analysis_bins,
+                )
+
+                # Relative error histogram for main model
+                self.plot_manager.create_relative_error_histogram(
+                    main_predictions["predictions"],
+                    main_predictions["targets"],
+                    plots_dir / "main_model_relative_errors.png",
+                    f"Main Model Relative Errors ({total_train_events} events)",
+                    n_bins=evaluation_config.error_analysis_bins,
+                    max_relative_error=2.0,
+                )
+
+            # 7. Data efficiency comparison summary
+            if all_results and len(all_results) > 1:
+                # Extract metrics for summary
+                data_size_metrics = {}
+                for data_size, results in all_results.items():
+                    test_metrics = results.get("test_metrics", {})
+                    if test_metrics:
+                        data_size_metrics[data_size] = test_metrics
+
+                # Add main model
+                main_test_metrics = main_results.get("test_metrics", {})
+                if main_test_metrics:
+                    data_size_metrics[total_train_events] = main_test_metrics
+
+                # Load k-fold results if available for error bars
+                kfold_results_file = eval_dir / "k_fold_statistics.json"
+                k_fold_data = None
+                if kfold_results_file.exists():
+                    try:
+                        with open(kfold_results_file, 'r') as f:
+                            k_fold_data = json.load(f)
+                        # Convert string keys to int
+                        if k_fold_data:
+                            k_fold_data = {int(k): v for k, v in k_fold_data.items()}
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load k-fold results: {e}")
+                        k_fold_data = None
+
+                if data_size_metrics:
+                    self.plot_manager.create_data_size_comparison_summary(
+                        data_size_metrics,
+                        plots_dir / "data_size_comparison_summary.png", 
+                        "Comprehensive Data Size Effect Analysis",
+                        k_fold_data,
+                    )
+
+            # 8. Multi-size comparison plot
+            if all_predictions and len(all_predictions) > 1:
+                self.plot_manager.create_multi_size_comparison_plot(
+                    all_predictions,
+                    plots_dir / "multi_size_prediction_comparison.png",
+                    "Multi-Size Prediction Quality Comparison",
+                    max_samples_per_plot=500,
+                )
+
         except Exception as e:
             self.logger.error(f"Failed to create plots: {e}")
             self.logger.exception("Detailed error:")
