@@ -1056,6 +1056,7 @@ class StandaloneRegressionPipeline:
                 },
                 "kfold_statistics": kfold_stats,
                 "n_successful_folds": len(fold_results),
+                "training_history": fold_results[best_fold_idx].get('training_history', {}),  # Use best fold's training history
             }
             
             predictions_dict = {
@@ -1248,14 +1249,6 @@ class StandaloneRegressionPipeline:
                         k_fold_data,
                     )
 
-            # 8. Multi-size comparison plot
-            if all_predictions and len(all_predictions) > 1:
-                self.plot_manager.create_multi_size_comparison_plot(
-                    all_predictions,
-                    plots_dir / "multi_size_prediction_comparison.png",
-                    "Multi-Size Prediction Quality Comparison",
-                    max_samples_per_plot=500,
-                )
 
         except Exception as e:
             self.logger.error(f"Failed to create plots: {e}")

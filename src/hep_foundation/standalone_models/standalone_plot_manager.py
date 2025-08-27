@@ -671,6 +671,31 @@ class StandalonePlotManager:
             _, unit_label = self._convert_units_if_needed(first_predictions, title_prefix)
             unit_suffix = f" ({unit_label})" if unit_label else ""
             
+            # Calculate global min/max for consistent axis ranges across all subplots
+            all_targets_converted = []
+            all_predictions_converted = []
+            
+            for data_size, pred_dict in valid_predictions.items():
+                predictions = pred_dict["predictions"].flatten()
+                targets = pred_dict["targets"].flatten()
+                
+                # Sample data if too large
+                if len(predictions) > sample_size:
+                    indices = np.random.choice(len(predictions), sample_size, replace=False)
+                    predictions = predictions[indices]
+                    targets = targets[indices]
+                
+                # Convert units if needed
+                predictions_converted, _ = self._convert_units_if_needed(predictions, title_prefix)
+                targets_converted, _ = self._convert_units_if_needed(targets, title_prefix)
+                
+                all_targets_converted.extend(targets_converted.flatten())
+                all_predictions_converted.extend(predictions_converted.flatten())
+            
+            # Calculate global range for consistent axes
+            global_min = min(np.min(all_targets_converted), np.min(all_predictions_converted))
+            global_max = max(np.max(all_targets_converted), np.max(all_predictions_converted))
+            
             for idx, (data_size, pred_dict) in enumerate(sorted(valid_predictions.items())):
                 if idx >= len(axes):
                     break
@@ -694,11 +719,13 @@ class StandalonePlotManager:
                 ax.scatter(targets_converted, predictions_converted, alpha=0.6, s=20, 
                           color=colors[idx % len(colors)])
                 
-                # Add perfect prediction line
-                min_val = min(np.min(targets_converted), np.min(predictions_converted))
-                max_val = max(np.max(targets_converted), np.max(predictions_converted))
-                ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
+                # Add perfect prediction line using global range
+                ax.plot([global_min, global_max], [global_min, global_max], 'r--', 
                        alpha=0.8, linewidth=LINE_WIDTHS["normal"])
+                
+                # Set consistent axis limits
+                ax.set_xlim(global_min, global_max)
+                ax.set_ylim(global_min, global_max)
                 
                 # Calculate and display R²
                 try:

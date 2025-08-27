@@ -292,8 +292,8 @@ def create_example_config(output_path: Path, logger) -> None:
                     "name": "example_regressor",
                 },
                 "hyperparameters": {
-                    "dropout_rate": 0.2,
-                    "l2_regularization": 0.001,
+                    "dropout_rate": 0.05,  # Reduced for better performance
+                    "l2_regularization": 0.0001,  # Reduced for better performance
                     "batch_normalization": True,
                 },
             }

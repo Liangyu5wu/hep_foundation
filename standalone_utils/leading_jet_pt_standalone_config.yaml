@@ -69,8 +69,8 @@ models:
       output_activation: "linear"
       name: "leading_jet_pt_regressor"
     hyperparameters:
-      dropout_rate: 0.2
-      l2_regularization: 0.0001  # L2 regularization for stability
+      dropout_rate: 0.05  # Reduced from 0.2 for better performance
+      l2_regularization: 0.00005  # Reduced from 0.0001 for better performance
       batch_normalization: true  # Batch normalization for training stability
 
 # Training Configuration - Comprehensive training setup
