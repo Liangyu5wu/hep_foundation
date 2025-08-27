@@ -63,6 +63,26 @@ class StandalonePlotManager:
         self.logger = get_logger(__name__)
         set_science_style(use_tex=False)
 
+    def _convert_units_if_needed(self, values: np.ndarray, variable_name: str = "") -> tuple[np.ndarray, str]:
+        """
+        Convert units for better display if needed.
+        
+        Args:
+            values: Array of values to potentially convert
+            variable_name: Name/description of the variable to help determine conversion
+            
+        Returns:
+            Tuple of (converted_values, unit_label)
+        """
+        # Check if this looks like jet pt in keV (typical range 20,000 - 500,000+ keV)
+        if ("jet" in variable_name.lower() and "pt" in variable_name.lower()) or \
+           (np.mean(np.abs(values)) > 1000 and np.max(np.abs(values)) > 10000):
+            # Convert keV to GeV (divide by 1000)
+            return values / 1000.0, "GeV"
+        else:
+            # Return original values with no specific unit
+            return values, ""
+
     def create_training_history_plot(
         self,
         history_data: dict[str, list[float]],
@@ -298,6 +318,11 @@ class StandalonePlotManager:
                 pred_sample = predictions
                 target_sample = targets
 
+            # Convert units if needed (e.g., keV to GeV for jet pt)
+            pred_sample_converted, unit_label = self._convert_units_if_needed(pred_sample, title_prefix)
+            target_sample_converted, _ = self._convert_units_if_needed(target_sample, title_prefix)
+            unit_suffix = f" ({unit_label})" if unit_label else ""
+
             # Create 2x2 subplot for better proportions and more comprehensive analysis
             fig, axes = plt.subplots(2, 2, figsize=get_figure_size("double", ratio=0.8))
             axes = axes.flatten()
@@ -305,15 +330,15 @@ class StandalonePlotManager:
 
             # Plot 1: Predictions vs Targets scatter
             axes[0].scatter(
-                target_sample,
-                pred_sample,
+                target_sample_converted,
+                pred_sample_converted,
                 alpha=0.6,
                 s=MARKER_SIZES["small"],
                 color=colors[0],
             )
             # Perfect prediction line
-            min_val = min(np.min(target_sample), np.min(pred_sample))
-            max_val = max(np.max(target_sample), np.max(pred_sample))
+            min_val = min(np.min(target_sample_converted), np.min(pred_sample_converted))
+            max_val = max(np.max(target_sample_converted), np.max(pred_sample_converted))
             axes[0].plot(
                 [min_val, max_val],
                 [min_val, max_val],
@@ -322,15 +347,15 @@ class StandalonePlotManager:
                 label="Perfect Prediction",
             )
 
-            axes[0].set_xlabel("True Values", fontsize=FONT_SIZES["small"])
-            axes[0].set_ylabel("Predictions", fontsize=FONT_SIZES["small"])
+            axes[0].set_xlabel(f"True Values{unit_suffix}", fontsize=FONT_SIZES["small"])
+            axes[0].set_ylabel(f"Predictions{unit_suffix}", fontsize=FONT_SIZES["small"])
             axes[0].set_title(
                 "Predictions vs True Values", fontsize=FONT_SIZES["normal"]
             )
             axes[0].legend(fontsize=FONT_SIZES["tiny"])
             axes[0].grid(True, alpha=0.3)
 
-            # Calculate R²
+            # Calculate R² using original values (units don't affect correlation)
             r2 = stats.pearsonr(target_sample.flatten(), pred_sample.flatten())[0] ** 2
             axes[0].text(
                 0.05,
@@ -342,16 +367,16 @@ class StandalonePlotManager:
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
             )
 
-            # Plot 2: Residuals histogram
-            residuals = pred_sample - target_sample
+            # Plot 2: Residuals histogram (use converted values)
+            residuals_converted = pred_sample_converted - target_sample_converted
             axes[1].hist(
-                residuals.flatten(), bins=50, alpha=0.7, color=colors[1], density=True
+                residuals_converted.flatten(), bins=50, alpha=0.7, color=colors[1], density=True
             )
             axes[1].axvline(
                 0, color="r", linestyle="--", linewidth=LINE_WIDTHS["thick"]
             )
             axes[1].set_xlabel(
-                "Residuals (Pred - True)", fontsize=FONT_SIZES["small"]
+                f"Residuals (Pred - True){unit_suffix}", fontsize=FONT_SIZES["small"]
             )
             axes[1].set_ylabel("Density", fontsize=FONT_SIZES["small"])
             axes[1].set_title(
@@ -360,12 +385,13 @@ class StandalonePlotManager:
             axes[1].grid(True, alpha=0.3)
 
             # Add residual statistics
-            mean_residual = np.mean(residuals)
-            std_residual = np.std(residuals)
+            mean_residual = np.mean(residuals_converted)
+            std_residual = np.std(residuals_converted)
+            format_str = "μ = {:.2f}{}\nσ = {:.2f}{}" if unit_label else "μ = {:.3e}{}\nσ = {:.3e}{}"
             axes[1].text(
                 0.05,
                 0.95,
-                f"μ = {mean_residual:.3e}\nσ = {std_residual:.3e}",
+                format_str.format(mean_residual, unit_suffix, std_residual, unit_suffix),
                 transform=axes[1].transAxes,
                 fontsize=FONT_SIZES["tiny"],
                 verticalalignment="top",
@@ -403,26 +429,27 @@ class StandalonePlotManager:
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
             )
 
-            # Plot 4: Error vs True Values scatter
-            abs_errors = np.abs(residuals.flatten())
+            # Plot 4: Error vs True Values scatter (use converted values)
+            abs_errors_converted = np.abs(residuals_converted.flatten())
             axes[3].scatter(
-                target_sample.flatten(),
-                abs_errors,
+                target_sample_converted.flatten(),
+                abs_errors_converted,
                 alpha=0.5,
                 s=MARKER_SIZES["tiny"],
                 color=colors[3],
             )
-            axes[3].set_xlabel("True Values", fontsize=FONT_SIZES["small"])
-            axes[3].set_ylabel("Absolute Error", fontsize=FONT_SIZES["small"])
+            axes[3].set_xlabel(f"True Values{unit_suffix}", fontsize=FONT_SIZES["small"])
+            axes[3].set_ylabel(f"Absolute Error{unit_suffix}", fontsize=FONT_SIZES["small"])
             axes[3].set_title("Error vs True Values", fontsize=FONT_SIZES["normal"])
             axes[3].grid(True, alpha=0.3)
 
             # Add MAE line
-            mae = np.mean(abs_errors)
+            mae = np.mean(abs_errors_converted)
+            mae_label = f"MAE = {mae:.2f} {unit_label}" if unit_label else f"MAE = {mae:.3e}"
             axes[3].axhline(
                 mae, color="orange", linestyle="--", 
                 linewidth=LINE_WIDTHS["thick"], 
-                label=f"MAE = {mae:.3e}"
+                label=mae_label
             )
             axes[3].legend(fontsize=FONT_SIZES["tiny"])
 
@@ -626,7 +653,7 @@ class StandalonePlotManager:
             cols = min(3, n_sizes)
             rows = (n_sizes + cols - 1) // cols
             
-            fig, axes = plt.subplots(rows, cols, figsize=get_figure_size("large", ratio=0.6))
+            fig, axes = plt.subplots(rows, cols, figsize=get_figure_size("large", ratio=0.4))
             if n_sizes == 1:
                 axes = [axes]
             elif rows == 1 and cols > 1:
@@ -637,6 +664,12 @@ class StandalonePlotManager:
                 axes = axes.flatten()
             
             colors = get_color_cycle("high_contrast", n_sizes)
+            
+            # Determine unit conversion from first dataset
+            first_data = next(iter(valid_predictions.values()))
+            first_predictions = first_data["predictions"].flatten()
+            _, unit_label = self._convert_units_if_needed(first_predictions, title_prefix)
+            unit_suffix = f" ({unit_label})" if unit_label else ""
             
             for idx, (data_size, pred_dict) in enumerate(sorted(valid_predictions.items())):
                 if idx >= len(axes):
@@ -653,13 +686,17 @@ class StandalonePlotManager:
                     predictions = predictions[indices]
                     targets = targets[indices]
                 
+                # Convert units if needed
+                predictions_converted, _ = self._convert_units_if_needed(predictions, title_prefix)
+                targets_converted, _ = self._convert_units_if_needed(targets, title_prefix)
+                
                 # Create scatter plot
-                ax.scatter(targets, predictions, alpha=0.6, s=20, 
+                ax.scatter(targets_converted, predictions_converted, alpha=0.6, s=20, 
                           color=colors[idx % len(colors)])
                 
                 # Add perfect prediction line
-                min_val = min(np.min(targets), np.min(predictions))
-                max_val = max(np.max(targets), np.max(predictions))
+                min_val = min(np.min(targets_converted), np.min(predictions_converted))
+                max_val = max(np.max(targets_converted), np.max(predictions_converted))
                 ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
                        alpha=0.8, linewidth=LINE_WIDTHS["normal"])
                 
@@ -675,8 +712,8 @@ class StandalonePlotManager:
                     pass
                 
                 ax.set_title(f'{data_size} events', fontsize=FONT_SIZES["normal"])
-                ax.set_xlabel('True Values', fontsize=FONT_SIZES["small"])
-                ax.set_ylabel('Predictions', fontsize=FONT_SIZES["small"])
+                ax.set_xlabel(f'True Values{unit_suffix}', fontsize=FONT_SIZES["small"])
+                ax.set_ylabel(f'Predictions{unit_suffix}', fontsize=FONT_SIZES["small"])
                 ax.grid(True, alpha=0.3)
             
             # Hide empty subplots
@@ -862,7 +899,7 @@ class StandalonePlotManager:
             n_rows = (n_sizes + n_cols - 1) // n_cols
 
             fig, axes = plt.subplots(
-                n_rows, n_cols, figsize=get_figure_size("double", ratio=0.6)
+                n_rows, n_cols, figsize=get_figure_size("double", ratio=0.4)
             )
             if n_rows == 1 and n_cols == 1:
                 axes = [axes]
@@ -872,6 +909,12 @@ class StandalonePlotManager:
                 axes = axes.flatten()
 
             colors = get_color_cycle("high_contrast", n_sizes)
+
+            # Determine unit conversion from first dataset
+            first_data = next(iter(multi_size_data.values()))
+            first_predictions = first_data["predictions"]
+            _, unit_label = self._convert_units_if_needed(first_predictions, title_prefix)
+            unit_suffix = f" ({unit_label})" if unit_label else ""
 
             for i, data_size in enumerate(data_sizes):
                 if i >= len(axes):
@@ -892,18 +935,22 @@ class StandalonePlotManager:
                     pred_sample = predictions
                     target_sample = targets
 
+                # Convert units if needed
+                pred_sample_converted, _ = self._convert_units_if_needed(pred_sample, title_prefix)
+                target_sample_converted, _ = self._convert_units_if_needed(target_sample, title_prefix)
+
                 # Scatter plot
                 axes[i].scatter(
-                    target_sample,
-                    pred_sample,
+                    target_sample_converted,
+                    pred_sample_converted,
                     alpha=0.6,
                     s=MARKER_SIZES["tiny"],
                     color=colors[i % len(colors)],
                 )
 
                 # Perfect prediction line
-                min_val = min(np.min(target_sample), np.min(pred_sample))
-                max_val = max(np.max(target_sample), np.max(pred_sample))
+                min_val = min(np.min(target_sample_converted), np.min(pred_sample_converted))
+                max_val = max(np.max(target_sample_converted), np.max(pred_sample_converted))
                 axes[i].plot(
                     [min_val, max_val],
                     [min_val, max_val],
@@ -928,9 +975,9 @@ class StandalonePlotManager:
                 axes[i].grid(True, alpha=0.3)
 
                 if i >= (n_rows - 1) * n_cols:  # Bottom row
-                    axes[i].set_xlabel("True Values", fontsize=FONT_SIZES["small"])
+                    axes[i].set_xlabel(f"True Values{unit_suffix}", fontsize=FONT_SIZES["small"])
                 if i % n_cols == 0:  # Left column
-                    axes[i].set_ylabel("Predictions", fontsize=FONT_SIZES["small"])
+                    axes[i].set_ylabel(f"Predictions{unit_suffix}", fontsize=FONT_SIZES["small"])
 
             # Hide unused subplots
             for i in range(n_sizes, len(axes)):
