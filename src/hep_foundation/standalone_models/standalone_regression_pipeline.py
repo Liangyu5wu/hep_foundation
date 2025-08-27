@@ -1139,21 +1139,8 @@ class StandaloneRegressionPipeline:
             if all_results and len(all_results) > 1:
                 histories_by_size = {}
                 for data_size, results in all_results.items():
-                    # Check if we have k-fold statistics with training history info
-                    if "kfold_statistics" in results and all_kfold_results and data_size in all_kfold_results:
-                        kfold_data = all_kfold_results[data_size]
-                        if isinstance(kfold_data, list) and len(kfold_data) > 0:
-                            # Average training histories from multiple folds
-                            fold_histories = []
-                            for fold_result in kfold_data:
-                                if isinstance(fold_result, dict) and 'training_history' in fold_result:
-                                    fold_histories.append(fold_result['training_history'])
-                            
-                            if fold_histories:
-                                # Average the training histories
-                                avg_history = self._average_training_histories(fold_histories)
-                                histories_by_size[data_size] = avg_history
-                                continue
+                    # Use single training history if available
+                    # Note: K-fold averaging of training histories would require additional implementation
                     
                     # Fall back to single training history if no k-fold data
                     if "training_history" in results:
