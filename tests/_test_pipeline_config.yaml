@@ -10,14 +10,13 @@ dataset:
   run_numbers: ["00298967", "00311481"]  # Just 2 runs for speed
   signal_keys: ["zprime_tt", "wprime_taunu"]  # 2 signals for testing (removed "DMA", "leptoquark", "dm_4top_scalar")
   catalog_limit: 2  # Very small for testing
-  event_limit: 200  # Limit events per catalog for faster testing
-  signal_event_limit: 500  # Higher limit for signal data to allow full sample collection
+  event_limit: 2000  # Limit events per catalog for faster testing
+  signal_event_limit: 5000  # Higher limit for signal data to allow full sample collection
   validation_fraction: 0.1
   test_fraction: 0.1
   shuffle_buffer: 100  # Small buffer
   plot_distributions: true  # Keep plots for verification
   save_raw_samples: true  # Save raw event samples for analysis
-  include_labels: true
   hdf5_compression: false  # Disable compression for faster test dataset creation
 
 # Task Configuration - matches existing test setup
@@ -58,7 +57,7 @@ task:
     - - input_branches:
           - "AnalysisJetsAuxDyn.pt"
         filter_branches:
-          - {"branch": "AnalysisJetsAuxDyn.pt", "min": 20.0}
+          - {"branch": "AnalysisJetsAuxDyn.pt", "min": 0.0} # Unsure of what min to set, leaving 0 for now
         sort_by_branch: {"branch": "AnalysisJetsAuxDyn.pt"}
         min_length: 1
         max_length: 1
@@ -100,6 +99,7 @@ anomaly_detection_evaluation:
 regression_evaluation:
   run_stage: true
   dataset: "atlas" # data to use in regression, either atlas or signal key
+  seed: 42  # Random seed for reproducible results
   model:
     model_type: "dnn_predictor"
     architecture:
@@ -116,7 +116,7 @@ regression_evaluation:
     batch_size: 1024
     learning_rate: 0.001
     encoder_learning_rate: 0.0005
-    epochs: 3
+    epochs: 10
     early_stopping:
       patience: 2
       min_delta: 0.001
@@ -125,6 +125,7 @@ regression_evaluation:
 signal_classification_evaluation:
   run_stage: true
   signal_key: "zprime_tt" # Which signal to classify
+  seed: 42  # Random seed for reproducible results
   model:
     model_type: "dnn_predictor"
     architecture:

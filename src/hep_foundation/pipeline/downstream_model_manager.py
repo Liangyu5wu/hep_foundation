@@ -37,6 +37,99 @@ class DownstreamModelManager:
         """
         self.logger = logger or get_logger(__name__)
 
+    def _initialize_model_weights(self, model: tf.keras.Model, seed: int) -> None:
+        """
+        Initialize model weights using a specific seed for reproducible results.
+
+        Args:
+            model: Keras model to initialize
+            seed: Random seed for weight initialization
+        """
+
+        def _get_seeded_initializer(original_initializer, layer_seed: int):
+            """Create a new seeded version of the given initializer."""
+            if isinstance(original_initializer, tf.keras.initializers.GlorotUniform):
+                return tf.keras.initializers.GlorotUniform(seed=layer_seed)
+            elif isinstance(original_initializer, tf.keras.initializers.GlorotNormal):
+                return tf.keras.initializers.GlorotNormal(seed=layer_seed)
+            elif isinstance(original_initializer, tf.keras.initializers.HeUniform):
+                return tf.keras.initializers.HeUniform(seed=layer_seed)
+            elif isinstance(original_initializer, tf.keras.initializers.HeNormal):
+                return tf.keras.initializers.HeNormal(seed=layer_seed)
+            elif isinstance(original_initializer, tf.keras.initializers.RandomUniform):
+                return tf.keras.initializers.RandomUniform(seed=layer_seed)
+            elif isinstance(original_initializer, tf.keras.initializers.RandomNormal):
+                return tf.keras.initializers.RandomNormal(seed=layer_seed)
+            elif isinstance(original_initializer, tf.keras.initializers.Zeros):
+                return original_initializer  # Zeros don't need seeding
+            elif isinstance(original_initializer, tf.keras.initializers.Ones):
+                return original_initializer  # Ones don't need seeding
+            else:
+                # For unknown initializers, try to create a seeded version
+                try:
+                    return original_initializer.__class__(seed=layer_seed)
+                except TypeError:
+                    # If the initializer doesn't support seeding, return original
+                    return original_initializer
+
+        # Use a counter to ensure each layer gets a unique but reproducible seed
+        layer_counter = 0
+
+        # Re-initialize all trainable weights in the model
+        for layer in model.layers:
+            if hasattr(layer, "kernel_initializer") and layer.kernel is not None:
+                # Create new seeded initializer for kernel weights
+                seeded_kernel_init = _get_seeded_initializer(
+                    layer.kernel_initializer, seed + layer_counter
+                )
+                layer.kernel.assign(
+                    seeded_kernel_init(
+                        shape=layer.kernel.shape, dtype=layer.kernel.dtype
+                    )
+                )
+                layer_counter += 1
+
+            if hasattr(layer, "bias_initializer") and layer.bias is not None:
+                # Create new seeded initializer for bias weights
+                seeded_bias_init = _get_seeded_initializer(
+                    layer.bias_initializer, seed + layer_counter
+                )
+                layer.bias.assign(
+                    seeded_bias_init(shape=layer.bias.shape, dtype=layer.bias.dtype)
+                )
+                layer_counter += 1
+
+            # Handle nested models (e.g., Sequential models within layers)
+            if hasattr(layer, "layers"):
+                for sublayer in layer.layers:
+                    if (
+                        hasattr(sublayer, "kernel_initializer")
+                        and sublayer.kernel is not None
+                    ):
+                        seeded_kernel_init = _get_seeded_initializer(
+                            sublayer.kernel_initializer, seed + layer_counter
+                        )
+                        sublayer.kernel.assign(
+                            seeded_kernel_init(
+                                shape=sublayer.kernel.shape, dtype=sublayer.kernel.dtype
+                            )
+                        )
+                        layer_counter += 1
+
+                    if (
+                        hasattr(sublayer, "bias_initializer")
+                        and sublayer.bias is not None
+                    ):
+                        seeded_bias_init = _get_seeded_initializer(
+                            sublayer.bias_initializer, seed + layer_counter
+                        )
+                        sublayer.bias.assign(
+                            seeded_bias_init(
+                                shape=sublayer.bias.shape, dtype=sublayer.bias.dtype
+                            )
+                        )
+                        layer_counter += 1
+
     def create_subset_dataset(
         self,
         dataset: tf.data.Dataset,
@@ -240,6 +333,7 @@ class DownstreamModelManager:
         save_training_history: bool = False,
         verbose_training: str = "minimal",
         return_accuracy: bool = False,
+        seed: Optional[int] = None,
     ) -> tuple[float, ...]:
         """
         Train and evaluate a downstream model.
@@ -257,11 +351,17 @@ class DownstreamModelManager:
             save_training_history: Whether to save training history
             verbose_training: Verbosity level for training
             return_accuracy: Whether to return accuracy metric (for classification)
+            seed: Random seed for weight initialization (optional)
 
         Returns:
             Tuple of (test_loss,) for regression or (test_loss, test_accuracy) for classification
         """
         self.logger.info(f"Training {model_name} model with {data_size} events...")
+
+        # Initialize model weights with seed if provided
+        if seed is not None:
+            self._initialize_model_weights(model, seed)
+            self.logger.debug(f"Initialized {model_name} weights with seed {seed}")
 
         # Wrap the Keras model with CustomKerasModelWrapper for ModelTrainer
         wrapped_model = CustomKerasModelWrapper(model, name=model_name)

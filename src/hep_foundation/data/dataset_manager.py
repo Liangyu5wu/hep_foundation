@@ -171,10 +171,18 @@ class DatasetManager:
         with open(dataset_config_path, "w") as f:
             yaml.dump(clean_config, f, default_flow_style=False, indent=2)
 
+        # Load existing dataset info if it exists
+        existing_info = {}
+        if dataset_info_path.exists():
+            import json
+
+            with open(dataset_info_path) as f:
+                existing_info = json.load(f)
+
         # Prepare metadata info with enhanced structure
         dataset_info = {
             "dataset_id": dataset_id,
-            "creation_date": str(datetime.now()),
+            "creation_date": existing_info.get("creation_date", str(datetime.now())),
             "atlas_version": self.atlas_manager.get_version(),
             "software_versions": {
                 "python": platform.python_version(),
@@ -184,11 +192,40 @@ class DatasetManager:
             },
         }
 
-        # Add processing stats if provided
+        # Merge processing stats if provided
         if processing_stats is not None:
-            dataset_info["processing_stats"] = self._convert_numpy_types(
-                processing_stats
-            )
+            new_stats = self._convert_numpy_types(processing_stats)
+            existing_stats = existing_info.get("processing_stats", {})
+
+            # Merge stats intelligently
+            merged_stats = dict(existing_stats)
+
+            # Handle dataset_type - if both background and signal, set to "mixed"
+            if existing_stats.get("dataset_type") and new_stats.get("dataset_type"):
+                if existing_stats["dataset_type"] != new_stats["dataset_type"]:
+                    merged_stats["dataset_type"] = "mixed"
+                else:
+                    merged_stats["dataset_type"] = new_stats["dataset_type"]
+            elif new_stats.get("dataset_type"):
+                merged_stats["dataset_type"] = new_stats["dataset_type"]
+
+            # Merge total_stats by adding values
+            if "total_stats" in new_stats:
+                if "total_stats" in merged_stats:
+                    for key, value in new_stats["total_stats"].items():
+                        merged_stats["total_stats"][key] = (
+                            merged_stats["total_stats"].get(key, 0) + value
+                        )
+                else:
+                    merged_stats["total_stats"] = new_stats["total_stats"]
+
+            # Add background_stats and signal_stats without overwriting
+            if "background_stats" in new_stats:
+                merged_stats["background_stats"] = new_stats["background_stats"]
+            if "signal_stats" in new_stats:
+                merged_stats["signal_stats"] = new_stats["signal_stats"]
+
+            dataset_info["processing_stats"] = merged_stats
 
         # Save metadata as JSON
         import json
@@ -318,6 +355,7 @@ class DatasetManager:
                     first_event_logged=False,
                     plot_data_dir=plot_data_dir,
                     sample_data_dir=sample_data_dir,
+                    include_labels=dataset_config.include_labels,
                 )
                 inputs, labels, stats = result
                 all_inputs.extend(inputs)
@@ -346,7 +384,11 @@ class DatasetManager:
                 )
 
                 # Create labels group if we have labels
-                if all_labels and dataset_config.task_config.labels:
+                # Check if all_labels contains actual label data (not just empty lists)
+                has_actual_labels = all_labels and any(
+                    label_set for label_set in all_labels
+                )
+                if has_actual_labels and dataset_config.task_config.labels:
                     labels_group = f.create_group("labels")
                     self._save_labels_to_hdf5_group(
                         labels_group,
@@ -365,9 +407,7 @@ class DatasetManager:
                     {
                         "dataset_id": dataset_id,
                         "creation_date": str(datetime.now()),
-                        "has_labels": bool(
-                            all_labels and dataset_config.task_config.labels
-                        ),
+                        "has_labels": has_actual_labels,
                         "normalization_params": json.dumps(norm_params),
                         "processing_stats": json.dumps(
                             self._convert_numpy_types(total_stats)
@@ -377,8 +417,6 @@ class DatasetManager:
 
             # Save configuration with enhanced processing stats
             enhanced_processing_stats = {
-                "dataset_type": "background",
-                "total_stats": total_stats,
                 "background_stats": total_stats,  # For consistency with signal format
             }
             dataset_config_path, dataset_info_path = self.save_dataset_config(
@@ -539,6 +577,7 @@ class DatasetManager:
                         first_event_logged=first_event_logged,
                         plot_data_dir=signal_plot_data_dir,
                         sample_data_dir=signal_sample_data_dir,
+                        include_labels=dataset_config.include_labels,
                     )
                     first_event_logged = True
 
@@ -569,7 +608,11 @@ class DatasetManager:
                     )
 
                     # Create labels group if we have labels
-                    if labels and dataset_config.task_config.labels:
+                    # Check if labels contains actual label data (not just empty lists)
+                    has_actual_labels = labels and any(
+                        label_set for label_set in labels
+                    )
+                    if has_actual_labels and dataset_config.task_config.labels:
                         labels_group = signal_group.create_group("labels")
                         self._save_labels_to_hdf5_group(
                             labels_group,
@@ -586,9 +629,7 @@ class DatasetManager:
                     # Store signal-specific attributes
                     signal_group.attrs.update(
                         {
-                            "has_labels": bool(
-                                labels and dataset_config.task_config.labels
-                            ),
+                            "has_labels": has_actual_labels,
                             "normalization_params": json.dumps(norm_params),
                             "processing_stats": json.dumps(
                                 self._convert_numpy_types(stats)
@@ -621,8 +662,7 @@ class DatasetManager:
 
             # Save configuration with enhanced processing stats
             enhanced_processing_stats = {
-                "dataset_type": "signal",
-                "total_stats": total_stats,
+                "signal_total_stats": total_stats,
                 "signal_stats": signal_processing_stats,
             }
             dataset_config_path, dataset_info_path = self.save_dataset_config(
